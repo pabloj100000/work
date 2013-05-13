@@ -1,0 +1,9 @@
+# var1 : 3
+# str1 : 'asdf'
+# str2 : "string2"
+# list1 : [1,2,3,4]
+# d = {'value1':1, 'value2':'2', 'value3':3.0}
+# float : 3.14
+
+
+
