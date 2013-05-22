@@ -74,7 +74,7 @@ def getChannel(chan,length, filename):
     # figure out if we are going to pull down the whole block or just a fraction
     samplesAdded = min(samplesNeeded, blockSize)
 
-    currentSamples = fromfile(f, '>i4', samplesAdded)
+    currentSamples = fromfile(f, '>f2', samplesAdded)
     output[block*blockSize:block*blockSize+len(currentSamples)] = currentSamples
 
     samplesNeeded -= samplesAdded
