@@ -1,0 +1,39 @@
+# Backups
+#########
+*.*~
+~
+# Compiled source
+#################
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+*.pyc
+
+# Packages
+##########
+*.dmg
+*.gz
+*.iso
+*.rar
+*.tar
+*.zp
+
+# Logs and databases
+####################
+*.log
+*.sql
+*.sqlite
+
+# OS generated files
+####################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.Icon?
+ehtumbs.db
+Thumbs.db
