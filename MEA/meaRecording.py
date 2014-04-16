@@ -1,3 +1,6 @@
+from numpy import fromfile
+from numpy import zeros
+
 def getRecordingHeader(filename):
   '''
     read header from an Igor generated recording with MEArecording
@@ -10,7 +13,6 @@ def getRecordingHeader(filename):
     ------
     header: a dictionary with key:value pairs
     '''
-  from numpy import fromfile
   f = open(filename, 'rb')
 	#FBinRead /big endian /unsigned 32 bit headerSize
 	#FBinRead /big endian, signed 16 bit refnum,type
@@ -23,7 +25,12 @@ def getRecordingHeader(filename):
   header['version'] = fromfile(f, '>i2', 1)[0]
   header['nscans'] = fromfile(f, '>u4', 1)[0]
   header['numberOfChannels'] = fromfile(f, '>u4', 1)[0]
-  header['whichChan'] = fromfile(f, '>i2', 1)[0]
+  # whichChan is a list of recorded channels. It has as many items as recorded channels. Each channel
+  # is a 2 byte signed integer
+  header['whichChan'] = []
+  for i in range(header['numberOfChannels']):
+	header['whichChan'].append(fromfile(f, '>i2', 1)[0])
+
   header['scanRate'] = fromfile(f, '>f4',1)[0]
   header['blockSize'] = fromfile(f, '>u4', 1)[0]
   header['scaleMult'] = fromfile(f, '>f4',1)[0]
@@ -53,31 +60,31 @@ def getChannel(chan,length, filename):
     ------
     channel: 1D ndarray
   '''
-  from numpy import fromfile
-  from numpy import zeros
-  import meaRecording as mea
   
-  header = mea.getRecordingHeader(filename)
+  header = getRecordingHeader(filename)
   blockSize = header['blockSize']
-  outputLength = int(length*header['scanRate'])
-  samplesNeeded = min(outputLength, header['nscans'])
-  outputLength = samplesNeeded
+  # Change length into scans or number of scans
+  scansRequested = int(length*header['scanRate'])
+  # Make sure that the scansRequested is not bigger than the scans available
+  scansRequested = min(scansRequested, header['nscans'])
+  # I'm going to loop through the file, adding scans until scansNeeded < 0
+  scansNeeded = scansRequested
 
   # Generate output, an ndarray of blockTime  = []
-  output = zeros(outputLength)
+  output = zeros(scansRequested)
   f = open(filename)
   block = 0
-  while samplesNeeded>0:
+  while scansNeeded>0:
     # get ready to read next block corresponding to channel in question
     f.seek(header['headerSize']+block*blockSize*header['numberOfChannels']*2+chan*blockSize*2)
     
     # figure out if we are going to pull down the whole block or just a fraction
-    samplesAdded = min(samplesNeeded, blockSize)
+    scansAdded = min(scansNeeded, blockSize)
 
-    currentSamples = fromfile(f, '>f2', samplesAdded)
+    currentSamples = fromfile(f, '>f2', scansAdded)
     output[block*blockSize:block*blockSize+len(currentSamples)] = currentSamples
 
-    samplesNeeded -= samplesAdded
+    scansNeeded -= scansAdded
     block += 1
 
   f.close()
