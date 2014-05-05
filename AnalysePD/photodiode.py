@@ -63,12 +63,11 @@ class PD(meaRecording.MEA):
 		period:			distance in between white frames for a given stimulus
 		frameperiod: 	float with average distance between monitor flips
 		'''
-		print self.monitorNominalRate
 
-		self.__GetScansPerFrame__()
 		self.__DetectWhiteFrames__(waitframes, whiteThresholdFactor)
 		self.__GetStartTEndT__(stimDeltaT)
 		self.__GetPeriod__()
+		self.__GetScansPerFrame__()
 		
 		return self.startT, self.endT, self.period, self.frameperiod
 	
@@ -177,10 +176,10 @@ class PD(meaRecording.MEA):
 												# Any other difference could be due to a recent switch in experiment or skipping frames
 			
 			# now compare delta with a single monitor frame period (actually half) to decide whether the two white frame distances are the same or not
-			if delta < self.frameperiod/2:
+			if delta < 1./self.monitorNominalRate/2:
 				# regular distance between white frames whithin a stimulus, do nothing
 				continue
-			elif delta - stimDeltaT < self.frameperiod/2:
+			elif delta - stimDeltaT < 1.0/self.monitorNominalRate/2:
 				# the distance between white frames increased by almost exactly stimDeltaT, this is a regular stimulus end and a new one has just started.
 				self.startT.append(self.whiteFrames[i])
 				self.endT.append(2*self.whiteFrames[i-1]-self.whiteFrames[i-2])	# it finished one period after self.whiteFrames[i-1]
