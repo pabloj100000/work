@@ -9,6 +9,8 @@ Here I will load all those spikes into a list of arrays named "spikes".
 
 from numpy import fromstring, where, diff, sign, array, concatenate, ndarray
 from collections import defaultdict, Counter
+from datetime import datetime
+import json
 import pdb
 
 def ToFloat(s):
@@ -18,7 +20,7 @@ def ToFloat(s):
         a=s
     return a
 
-def LoadVariables(expName, fileName='startT.txt'):
+def loadVariables(expName, fileName='startT.txt'):
     # if expName has extension, remove it
     expName = expName.split('.')[0]
 
@@ -40,7 +42,7 @@ def LoadVariables(expName, fileName='startT.txt'):
                 vals = {fields[i]:ToFloat(values[i]) for i in range(len(fields))}
                 return vals
 
-def LoadOneCell(expName, cell):
+def loadOneCell(expName, cell):
     '''
     Load all spikes for the given expName and cell.
     expName: a str, probably something like RF.spk, UFlicker.spk, etc
@@ -65,7 +67,7 @@ def LoadOneCell(expName, cell):
 
     raise ValueError(message)
 
-def LoadAllCells(expName):
+def loadAllCells(expName):
     '''
     Load all spikes for all cells under the given experiment
     expName: a str, probably something like RF.spk, UFlicker.spk, etc
@@ -151,3 +153,56 @@ def divideSpikes(spikes, blockStartT, blockEndT, blockSeq, flag):
         accumulatedTime[blockSeq[i]] += blockEndT[i] - blockStartT[i]
 
     return spikesOut
+
+def writeParameters(d):
+    '''
+    Write dictionary d at the beginning of 'parameters.txt' in a human readable format along with a comment indicating processing date and time.
+    '''
+    
+    # Open the file and read into memory the whole thing
+    with open('parameters.txt', 'r') as fid:
+        # read the whole file
+        oldText = fid.read()
+        
+    # Now re-open the file again, this time for writing. Add the new processing information and then dump the old data
+    with open('parameters.txt', 'w') as fid:
+        # insert a greeting with the date
+        fid.write(datetime.today().strftime('# %A, %B %d %Y @ %X\r'))
+
+        # store input dictionary
+        json.dump(d, fid)
+        fid.write('\r')
+
+        # Add an empty line for human readability
+        fid.write('\r')
+        
+        # Add old data to file
+        fid.write(oldText)
+
+def loadParameters(expName):
+    '''
+    Open parameters.txt and extract the dictionary with values last used in processing expName
+    '''
+    
+    # Since every time I process an experiment parameters are added at the beginning of the file, just read until the given 'expName' is found and then extract the parameters
+    # Since some expNames might be similar don't just look for expName, but explicitly for:  '"expName": "..."' (where ... is passed parameter 'expName')
+
+    with open('parameters.txt') as fid:
+        # Scan file until a line contains "expName": "..." (where ... is passed parameter 'expName')
+        # Then read that line as a dictionary and return it
+        
+        searchStr = '"expName": "'+expName+'"'
+        for line in fid:
+            if line.find(searchStr) >= 0:
+                d = json.loads(line)
+                return d
+    
+    # if execution got to this point, expName was not found
+    return {}
+
+'''
+def test_var_args(f_arg, *argv):
+    print "first normal arg:", f_arg
+    for arg in argv:
+        print "another arg through *argv :", arg
+'''
