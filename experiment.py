@@ -91,6 +91,8 @@ def loadAllCells(expName):
     
     with open(expName, 'r') as f_in:
         for line in f_in:
+            if line[0] == '#':
+                continue
             spikeList.append(fromstring(line, dtype=float, sep='\t'))
 
 
