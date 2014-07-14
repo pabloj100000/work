@@ -20,6 +20,7 @@ def ToFloat(s):
         a=s
     return a
 
+'''
 def loadVariables(expName, fileName='startT.txt'):
     # if expName has extension, remove it
     expName = expName.split('.')[0]
@@ -41,6 +42,16 @@ def loadVariables(expName, fileName='startT.txt'):
             if values[-1].split('.')[0] == expName:
                 vals = {fields[i]:ToFloat(values[i]) for i in range(len(fields))}
                 return vals
+'''
+def loadVariables(expName):
+    '''
+    Load experimental parameters from spk file
+    '''
+    with open(expName) as fid:
+        header = fid.readline()[2:]
+
+        d = json.loads(header)
+        return d
 
 def loadOneCell(expName, cell):
     '''
@@ -51,12 +62,13 @@ def loadOneCell(expName, cell):
     output: spks, a numpy_array
     '''
     with open(expName, 'r') as f_in:
-        lineN = 0
+        lineN = 0   # not counting comment lines
         for line in f_in:
-            if lineN == cell:
+            if line[0] == '#':
+                continue
+            elif lineN == cell:
                 f_in.close()
                 spikes = fromstring(line, dtype=float, sep='\t')
-                tempFix(spikes, expName)
                 return spikes
                 #return fromstring(line, dtype=float, sep='\t')
 
@@ -84,7 +96,7 @@ def loadAllCells(expName):
 
     f_in.close()
     return spikeList
-
+'''
 def tempFix(spikes, expName):
     vars = LoadVariables(expName)
     spikes -= vars['startT']
@@ -92,7 +104,7 @@ def tempFix(spikes, expName):
     vars['startT']=0
 
     return vars
-
+'''
 def divideSpikes(spikes, blockStartT, blockEndT, blockSeq, flag):
     '''
     From spikes, generate a list of arrays. List element 'i' holds all spikes associated with blockSeq 'i'
