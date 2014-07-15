@@ -132,7 +132,7 @@ def divideSpikes(spikes, blockStartT, blockEndT, blockSeq, flag):
     # Make a dictionary where keys are blockSeq IDs and the values are the accumulated time under such condition. This will be used if flag==2
     accumulatedTime = Counter()#defaultdict(lambda : array([]))
 
-    # start an empty list where spikes will be added
+    # start an empty array where spikes will be added
     spikesOut = defaultdict(lambda : array([]))
 
     # add two spike to 'spikes' one prior to first blockStartT and one after last blockEndT to avoid special cases below. By adding these spikes startIndex and lastIndex are always found
@@ -140,7 +140,7 @@ def divideSpikes(spikes, blockStartT, blockEndT, blockSeq, flag):
     postSpk = array([blockEndT[-1]+1])
     spks = concatenate((preSpk, spikes, postSpk))
 
-    pdb.set_trace()
+    #pdb.set_trace()
     for i, startT in enumerate(blockStartT):
         # find 1st spike in spikes that is greater than startT
         startIndex = where(diff(sign(spks-startT)))[0][0]+1
@@ -200,7 +200,6 @@ def loadParameters(expName):
     
     # Since every time I process an experiment parameters are added at the beginning of the file, just read until the given 'expName' is found and then extract the parameters
     # Since some expNames might be similar don't just look for expName, but explicitly for:  '"expName": "..."' (where ... is passed parameter 'expName')
-
     with open('parameters.txt') as fid:
         # Scan file until a line contains "expName": "..." (where ... is passed parameter 'expName')
         # Then read that line as a dictionary and return it
@@ -214,9 +213,3 @@ def loadParameters(expName):
     # if execution got to this point, expName was not found
     return {}
 
-'''
-def test_var_args(f_arg, *argv):
-    print "first normal arg:", f_arg
-    for arg in argv:
-        print "another arg through *argv :", arg
-'''
