@@ -31,6 +31,7 @@ def preProcess(expName, spikeFile):
 
     # load all cells
     cells = exp.loadAllCells(spikeFile)
+    d1['cellsN'] = len(cells)
 
     # Load the sequence of home and targets
     blockSeq = Load_HT_Seq(d1['saccadesN'])
@@ -152,9 +153,9 @@ def processInformation(expName='GNS', spikeFile='GaussianNatScene.spk', dnew={})
     print('Plotting information')
     _plt.close('Information')
     _plt.figure('Information')
-    _plt.plot(latencyInfo, 'r', label = 'Latency')
-    _plt.plot(spkCntInfo, 'b', label = 'Spike Count')
-    _plt.plot(spkCntLatInfo, 'k', label = 'Lat and SpkCnt')
+    _plt.plot(latencyInfo, 'ro', label = 'Latency')
+    _plt.plot(spkCntInfo, 'bo', label = 'Spike Count')
+    _plt.plot(spkCntLatInfo, 'ko', label = 'Lat and SpkCnt')
     _plt.plot(latencyInfoSh, 'r.')
     _plt.plot(spkCntInfoSh, 'b.')
     _plt.plot(spkCntLatInfoSh, 'k.')
@@ -162,6 +163,7 @@ def processInformation(expName='GNS', spikeFile='GaussianNatScene.spk', dnew={})
     _plt.xlabel('Image ID')
     _plt.title('Mutual Information')
     _plt.legend()
+    _plt.xlim(-.5, len(cells)+.5)
     _plt.show()
 
     return d, cells, latency, spkCnt, blockSeq, latencyInfo, spkCntInfo, spkCntLatInfo
