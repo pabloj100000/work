@@ -4,6 +4,7 @@ import basicAnalysis as ba
 import filtertools as ft
 import stimulustools as st
 import responsetools as rt
+import information as info
 import numpy as _np
 import pdb as _pdb
 import matplotlib.pyplot as _plt
@@ -129,8 +130,41 @@ def processInformation(expName='GNS', spikeFile='GaussianNatScene.spk', dnew={})
     # convert latency into discrete symbols (for each cell)
     latency = ba.processNested(lambda x: _np.floor(x/binLength), 0, latency)
     
+    # combine latency and spkCnt into a unique symbol
+    spkCntLat = ba.processNested(lambda x, y: list(zip(x, y)), 0, latency, spkCnt)
+
+
+    # process information
+    print('Processing Information')
+    latencyInfo = ba.processNested(info.mi, 0, latency, blockSeq)
+    spkCntInfo = ba.processNested(info.mi, 0, spkCnt, blockSeq)
+    spkCntLatInfo = [info.mi(spkCntLat[i], blockSeq) for i in range(len(cells))]
+
+    # as a control, process information with a shuffled version of blockSeq
+    shuffled = blockSeq.copy()
+    _np.random.shuffle(shuffled)
+    latencyInfoSh = ba.processNested(info.mi, 0, latency, shuffled)
+    spkCntInfoSh = ba.processNested(info.mi, 0, spkCnt, shuffled)
+    spkCntLatInfoSh = [info.mi(spkCntLat[i], shuffled) for i in range(len(cells))]
     
-    return d, cells, latency, spkCnt, blockSeq
+    
+    # make a nice plot
+    print('Plotting information')
+    _plt.close('Information')
+    _plt.figure('Information')
+    _plt.plot(latencyInfo, 'r', label = 'Latency')
+    _plt.plot(spkCntInfo, 'b', label = 'Spike Count')
+    _plt.plot(spkCntLatInfo, 'k', label = 'Lat and SpkCnt')
+    _plt.plot(latencyInfoSh, 'r.')
+    _plt.plot(spkCntInfoSh, 'b.')
+    _plt.plot(spkCntLatInfoSh, 'k.')
+    _plt.ylabel('Information (Bits)')
+    _plt.xlabel('Image ID')
+    _plt.title('Mutual Information')
+    _plt.legend()
+    _plt.show()
+
+    return d, cells, latency, spkCnt, blockSeq, latencyInfo, spkCntInfo, spkCntLatInfo
 
     
 def Load_HT_Seq(N):

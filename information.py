@@ -33,8 +33,6 @@ def labels2prob(*argv):
         argv:   a list of iterables
                 can be a single iterable
     '''
-    #itermax = [max(i) for i in iterList]
-    #itermin = [min(i) for i in iterList]
     from collections import Counter
     myCounter = Counter()
     
@@ -57,6 +55,7 @@ def mi(x, y):
     -------
         mi:     float
     '''
+    #_pdb.set_trace()
     # dict.values() returns a view object that has to be converted to a list before being converted to an array
     probX = _np.array(list(labels2prob(x).values()))
     probY = _np.array(list(labels2prob(y).values()))
