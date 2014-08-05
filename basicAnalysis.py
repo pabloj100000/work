@@ -1,5 +1,4 @@
 #!/Users/jadz/anaconda/bin/python
-#from numpy import  concatenate as _concatenate, modf as _modf, linspace as _linspace, ceil as _ceil, histogram as _histogram, mod as _mod, iterable as _iterable, random as _random, arange as _arange
 import numpy as _np
 import matplotlib.pyplot as _plt
 import pdb as _pdb
@@ -8,8 +7,9 @@ def raster(spikes, period):
     '''
     return a 2D numpy array that has raster X/Y information for the spikes
     '''
+    # modf returns fractional and integral part of a number. Fraction here means fraction of a period
     X, Y = _np.modf(spikes/period)
-    X = X.reshape(-1,1)
+    X = X.reshape(-1,1)*period
     Y = Y.reshape(-1,1)
 
     raster = _np.concatenate((X,Y), axis=1)
@@ -38,46 +38,6 @@ def psth(spikes, period, repeats, deltaT=.05, plotFlag=0, returnFlag=0):
     elif returnFlag == 2:
         return bins
 
-def _sta(stim, spikes, stimDeltaT, staStartT, staDeltaT, staEndT=0):
-    '''
-    Compute the Spike Triggered Average
-    stim:       the stimulus, last dimension is time
-    spikes:     an array of spike times
-    stimDeltaT: time resolution in the stimulus (the difference in between two consecutive stimulus frames)
-    staStartT:     time in seconds to start computing the sta, typically -0.5 (half a second before a spike)
-    staDeltaT:     time resolution for the sta, doesn't have to be the same as in the stimulus. typically .01 (10 ms)
-    staEndT:       time in seconds after a spike to end the sta. Typically 0 but other values are possible. Useful in debugging certain stimuli
-    '''
-    _pdb.set_trace()
-    # how many timePnts do I need for the STA?
-    timePntsOut = _np.ceil((staEndT-staStartT)/staDeltaT)
-
-    # make an index array to link pnts in sta to points in stim
-    pnt2pnt = _np.empty(timePntsOut, int)
-
-    # how many pnts does staStartT correspond to in stim?
-    startPntsIn = -_np.ceil(-staStartT/stimDeltaT)
-
-    # how many pnts does staEndT correspond to in stim?
-    endPntsIn = -_np.ceil(staEndT/staDeltaT)
-
-    # use only spikes that take place in between startPntsIn and endPntsIn
-    spikes = spikes[startPntsIn:-endPntsIn]
-    
-    
-    print(spikes)
-    '''
-    # preallocate the sta
-    sta = _np.empty(stim.shape[-1],timePnts)
-
-    # remove from spikes all spikes for which I will not be able to add the stim staStartT seconds before teh spike or staEndT seconds after the spike
-    spikes = spikes(_np.where(spikes > 
-    # redimension stim to be 2D, collapsing all non time dimensions
-    stim2D = stim.reshape(-1, stim.shape[-1])
-    
-
-    spikeBins = 
-    '''
 
 def processNested(func, nestedArgIndex, *argv, recLevel=0, **kwargv):
     '''
@@ -131,14 +91,14 @@ def _argFromArgs(i, nestedArgIndex, *argv):
                             if len(tout[j]) == len(tout[nestedArgIndex]):
                                 tout[j] is replaced by tout[j][i] if tout[j] is iterable and tout[j] if it is not an iterable
     
-    General idea
+General idea
     In calling basicAnalysis.procesNested(func, nestedArgIndex, argv, ...)
     I might want to pass the same arg to every element in nestedArgIndex or a different value of the same argument to each call of func(*argv, **kwargv)
     I'm envisioning a solution where before calling map
     '''
     #Careful with strings, if an arg is passed to argv and its length matches argv[nestedArgIndex] it will be changed.
     #Not clear to me what desired behaviour is yet
-    return tuple([arg[i] if _np.iterable(arg) and len(arg)==len(argv[nestedArgIndex]) else arg for arg in argv])
+    return tuple([arg[i] if isinstance(arg, list) and len(arg)==len(argv[nestedArgIndex]) else arg for arg in argv])
 
 
 def nestArgument(arg, nestedLike):
@@ -157,24 +117,48 @@ def nestArgument(arg, nestedLike):
         processNested(nestedLike, lambda x: arg)
     '''
 
-def plot2D(list2D, *argv, **kwargv):
+def plot2D(list2D, x=None, filename=None, *argv, **kwargv):
     '''
     plot all list2D traces, assumes that each element in list2D is a list with the same number of elements.
     '''
     #_pdb.set_trace()
-    colsN = len(list2D)
-    rowsN = len(list2D[0])
+    colsN = len(list2D[0])
+    rowsN = len(list2D)
 
     # find the maximum value in list2D to adjust ylim
     from itertools import chain
+    
     #maxV = max(chain.from_iterable(*list2D))
     maxV = max(chain(*chain(*list2D)))
+    minV = min(chain(*chain(*list2D)))
 
+    _plt.figure(0)
+    _plt.close()
+    _plt.figure(0)
     for row in range(rowsN):
         for col in range(colsN):
             _plt.subplot(rowsN, colsN, col + row*colsN + 1)
-            _plt.plot(list2D[col][row], *argv, **kwargv)
-            _plt.ylim(0, maxV)
+            if x is None:
+                _plt.plot(list2D[row][col], *argv, **kwargv)
+            else:
+                _plt.plot(x, list2D[row][col], *argv, **kwargv)
+
+            _plt.ylim(minV, maxV)
+
+            if row == rowsN-1:
+                _plt.tick_params(\
+                    axis='both',          # changes apply to the y-axis
+                    which='both',      # both major and minor ticks are affected
+                    left='off',      # ticks along the bottom edge are off
+                    right='off',         # ticks along the top edge are off
+                    labelleft='off',
+                    top='off'
+                    ) # labels along the bottom edge are off
+            else:
+                _plt.axis('off')
+    
+    if filename is not None:
+        _plt.savefig(filename)
 
 def _testProcessNested(case):
     arg0 = [['a','b','c'],['d','e'],[['f','g'],['h']]]
