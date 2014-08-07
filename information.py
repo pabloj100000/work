@@ -62,3 +62,28 @@ def mi(x, y):
     probXY = _np.array(list(labels2prob(x, y).values()))
 
     return getEntropy(probX) + getEntropy(probY) - getEntropy(probXY)
+
+def gaussianEntropy(var):
+    '''
+    compute the entropy of a gaussian distribution with variance 'var' using differential entropy formula. Works for covariance matrix as well
+
+    var:    float, the variance
+            ndarray, a covariance matrix
+    '''
+    
+    #print(var.ndim)
+    #print(_np.linalg.det(var))
+    #print(0.5*_np.log2( (2*_np.pi*_np.e)**var.ndim * _np.linalg.det(var) ))
+    try:
+        # assuming var is a covariance matrix (a ndarray of at least 2 dimensions)
+        return 0.5*_np.log2( (2*_np.pi*_np.e)**var.ndim * _np.linalg.det(var) )
+        # replace inf by 0
+        #entropy[_np.where(entropy == inf)] = 0
+        #return entropy
+    except:
+        # if it failed, then most likely is just a number
+        # if var == 0, log2 will be inf but H should be 0
+        #if var==0:
+        #    return 0
+        #else:
+        return 0.5*_np.log2(2*_np.pi*_np.e * var)
