@@ -10,6 +10,8 @@ def getEntropy(prob):
     given a probability distribution (prob), calculate and return its entropy
     '''
     
+    #_pdb.set_trace()
+
     if not isinstance(prob, _np.ndarray):
         raise TypeError('getEntropy needs prob to be an ndarray') 
 
@@ -25,29 +27,40 @@ def getEntropy(prob):
     return -1.0* _np.dot(prob, logProb)
 
 
-def labels2prob(*argv):
+def labels_to_prob(labels):
     '''
-    zipping all iterables in iterList, generate a dictionary with the probability of each item
+    Return the probability distribution of labels. Only probabilities are returned and in random order, you don't know what the probability of a given label is but this can be used to compute entropy
 
     input:
-        argv:   a list of iterables
-                can be a single iterable
-
-        output_flag:    0, returns a counter with elements as keys and prob as values
-                    1, returns an ndarray with just the probabilities, order is arbitrary as in the counter
+        labels:     iterable of hashable items
+                    works well if labels is a zip of iterables
     '''
     from collections import Counter
-    myCounter = Counter()
+    myCounter = Counter
     
     #_pdb.set_trace()
 
-    N = len(argv[0])
-    for item in zip(*argv):
-        myCounter[item]+=1./N
+    #if isinstance(labels, zip):
+    #    labels = list(labels)
 
-    return myCounter
-    #_np.array(list(myCounter.values()))
+    #for i in zip(*argv):
+    #    print(i, type(i))
+    #    if ismutable(arg[0]):
+    #        argv[i] = list(map(tuple, arg))
 
+    
+    # count number of occurrances of each simbol in *argv (return as list of just the count)
+    asList = list(myCounter(labels).values())
+
+    # total count of symbols
+    N = sum(asList)
+
+    return _np.array([n/N for n in asList])
+
+def combine_labels(*args):
+    return tuple(zip(*args))
+
+"""
 def multi_D_sybmols_to_1D(x):
     '''
     x is an iterable where each element is multidimensional. Change each multidimensional item by an integer key
@@ -57,7 +70,7 @@ def multi_D_sybmols_to_1D(x):
     output = []
     next_index = 0
     for element in x:
-        # dictionary keys have to be immutable, trun element to a tuple
+        # dictionary keys have to be immutable, turn element to a tuple
         element = tuple(element)
         if element not in lookuptable:
             lookuptable[element] = next_index
@@ -65,24 +78,35 @@ def multi_D_sybmols_to_1D(x):
         output.append(lookuptable[element])
 
     return output
-
+"""
 def mi(x, y):
     '''
     compute and return the mutual information between x and y
     
     inputs:
     -------
-        x, y:   iterables with discrete symbols
+        x, y:   iterables of hashable items
     
     output:
     -------
         mi:     float
+
+    Notes:
+    ------
+        if you are trying to mix several symbols together as in mi(x, (y0,y1,...)), try
+                
+        info[p] = _info.mi(x, info.combine_labels(y0, y1, ...) )
     '''
     #_pdb.set_trace()
     # dict.values() returns a view object that has to be converted to a list before being converted to an array
-    probX = _np.array(list(labels2prob(x).values()))
-    probY = _np.array(list(labels2prob(y).values()))
-    probXY = _np.array(list(labels2prob(x, y).values()))
+    if isinstance(x, zip):
+        x = list(x)
+    if isinstance(y, zip):
+        y = list(y)
+
+    probX = labels_to_prob(x)
+    probY = labels_to_prob(y)
+    probXY = labels_to_prob(zip(x, y))
 
     return getEntropy(probX) + getEntropy(probY) - getEntropy(probXY)
 
@@ -106,10 +130,10 @@ def cond_mi(x, y, z):
     '''
     #_pdb.set_trace()
     # dict.values() returns a view object that has to be converted to a list before being converted to an array
-    probXZ = _np.array(list(labels2prob(x, z).values()))
-    probYZ = _np.array(list(labels2prob(y, z).values()))
-    probXYZ = _np.array(list(labels2prob(x, y, z).values()))
-    probZ = _np.array(list(labels2prob(z).values()))
+    probXZ = labels_to_prob(combine_labels(x, z))
+    probYZ = labels_to_prob(combine_labels(y, z))
+    probXYZ =labels_to_prob(combine_labels(x, y, z))
+    probZ = labels_to_prob(z)
 
     return getEntropy(probXZ) + getEntropy(probYZ) - getEntropy(probXYZ) - getEntropy(probZ)
 
@@ -144,31 +168,33 @@ def mi_chain_rule(X, y):
         
     return chain
 
-def binned(x, binsN, maxX=None, minX=None):
+def binned(x, binsN, mode, maxX=None, minX=None):
     '''
     bin signal x using 'binsN' bin. If minX, maxX are None, they default to the full range of the signal. If they are not None, everything above maxX gets assigned to binsN-1 and everything below minX gets assigned to 0
+    Acutal binning depends on mode:
+
+    mode:   0           bin_size = (maxX-minX)/binsN
+
+            1           bin_size is adaptive to get equal number of responses in each bin.
+
     '''
-    bins = list(_np.arange(0, 100.1, 100/binsN)) 
-    percentiles = _np.percentile(x, bins)
-    return _np.digitize(x, percentiles)
-    """
-    assert isinstance(x, _np.ndarray), 'For the time being, info.binned only works with ndarrays. Either expand usage or change data before calling binned'
     #_pdb.set_trace()
-
-    small = x.min()/1E6
-
     if maxX is None:
         maxX = x.max()
-    else:
-        x = _np.where(x>=maxX, _np.ones_like(x)*(maxX-small), x)
 
     if minX is None:
         minX = x.min()
-    else:
-        x = _np.where(x<minX, _np.ones_like(x)*(minX+small), x)
+
+    if mode==0:
+        bins = _np.linspace(minX, maxX, binsN)
+    elif mode==1:
+        percentiles = list(_np.arange(0, 100.1, 100/binsN)) 
+        bins = _np.percentile(x, percentiles)
     
-    return _np.floor(binsN*(x-minX)/(maxX-minX+.01))
-    """
+    
+    # digitize works on 1d array but not nd arrays. So I pass the flattened version of x and then reshape back into x's original shape at the end
+    return _np.digitize(x.flatten(), bins).reshape(x.shape)
+
 
 def gaussianEntropy(var):
     '''
@@ -274,3 +300,11 @@ def subCov(cov, points):
     from itertools import product
     return _np.take(cov.flatten(), [i[0]+ cov.shape[0]*i[1] for i in product(points, points)]).reshape(-1, len(points))
     
+def ismutable(x):
+    '''
+    return True if mutable, False if not
+    '''
+    if isinstance(x, (str, int, float, bool, tuple)):
+        return False
+    else:
+        return True
