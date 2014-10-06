@@ -5,6 +5,7 @@ import nose
 import numpy as np
 import naturalscenes as ns
 import information as info
+import pdb
 
 def setup():
     pass
@@ -49,7 +50,7 @@ def test_02():
     nose.tools.assert_almost_equal(info0, infoCond1)
     """
 
-def test_adaptation()
+def test_adaptation():
     adapt_block = ns.adaptation_block('memory_normalization', 2, 0)
     a=np.ones((10000,2))
     a[:,0]*=2
@@ -57,3 +58,33 @@ def test_adaptation()
     
     # not sure if next line will work, but b[0,:] should be almost equal b[1,:]
     nose.tools.assert_almost_equals(b[:,0], b[:,1])
+
+def test_total_information_1(N):
+    '''
+    generate an array like binned_g and compute the total_information between g and g, result should be close to N (bits)
+    '''
+    pdb.set_trace()
+    g = np.random.random_integers(0,(2**N)-1, (10000,300))
+    g = tuple(map(tuple, g.T))
+
+    result = ns.get_total_info_since_t0(g, g, .8)
+
+    return result
+
+def test_total_information_2(N, noise):
+    '''
+    generate two array like binned_g and letters in get_total_information_since_t0.
+    
+    One with N bits and the other, idential to the 1st one plus a uniform distribution with noise bits. I think results should be N-noise if noise < N
+    '''
+    g = np.random.random_integers(0,(2**N)-1, (10000,300))
+    L = g + np.random.random_integers(1, noise(10000,300))
+    
+    g = tuple(map(tuple, g.T))
+    L = tuple(map(tuple, L.T))
+
+
+    result = ns.get_total_info_since_t0(g, L, .8)
+    print(N-noise, results, N-noise-result)
+
+    return result

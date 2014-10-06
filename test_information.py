@@ -40,6 +40,24 @@ def test_mi():
     y[:len(x)/2] = x[:len(x)/2]
     y[len(x)/2:] = np.random.randint(0, 2**bitsN, len(x)/2)
 
+def test_mi2():
+    '''
+    Test mi with combined symbols
+    '''
+    N = 3
+    l0 = np.random.random_integers(1,2**N, 100000)
+    l1 = np.random.random_integers(1,2**N, 100000)
+    l2 = np.random.random_integers(1,2**N, 100000)
+    l3 = np.random.random_integers(1,2**N, 100000)
+
+    t0 = info.combine_labels(l0, l0)
+    t1 = info.combine_labels(l0, l1)
+    t2 = info.combine_labels(l1, l0)
+    t3 = info.combine_labels(l0, l2)
+    t4 = info.combine_labels(l2, l3)
+
+    print(info.mi(t0, t0), info.mi(t0,t1), info.mi(t1, t2), info.mi(t1, t3), info.mi(t1,t4))
+
 def test_cond_mi():
     # information with itself given iteslf should be about 0
     np.testing.assert_approx_equal(0, info.cond_mi(x, x, x), significant=2)

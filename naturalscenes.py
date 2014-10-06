@@ -13,7 +13,6 @@ import pdb as _pdb
 import pandas as _pd
 from time import time as _time
 import pickle as _pickle
-import natural_scenes_fitting as _nsf
 import pink_noise as _pn
 from matplotlib.widgets import Button
 
@@ -56,6 +55,7 @@ periphery_exc = 1       # this controlls the relative height of the gating excit
 periphery_inh = -1      # this controlls the relative height of the gating inhibitory window
 gating_start_t = .05    # this controlls where gating starts
 gating_end_t = .15      # this controlls where gating ends/inhibition starts
+inhibition_end_t = .35  # this controlls where inhibition ends and basal starts
 recovery_start_t = 0.25  # this controlls where inhibition ends and starts to recover to basal state
 recovery_end_t = 0.4   # this controlls when the system returns to basal state
 
@@ -63,6 +63,7 @@ recovery_end_t = 0.4   # this controlls when the system returns to basal state
 nl_type = 'birect'
 nl_basal_threshold = 0
 nl_gating_threshold = -65
+nl_inh_threshold = 65
 nl_units = 'linear prediction'
 
 # define parameters for adaptation block
@@ -115,13 +116,15 @@ def data_summary():
     noisy_g = g + 1*bipolar.get_noise(g.shape, noise_std, noise_corr_time)
     #noisy_g = g
 
-    # Compute letters at all times under both basal and gating nonlinearities
+    # Compute letters at all times under all nonlinearities
     print('Computing letters at all times under both basal and gating nonlinearities')
     basal_letters = bipolar.nl_basal.torate(noisy_g)
     gating_letters = bipolar.nl_gating.torate(noisy_g)
+    inh_letters = bipolar.nl_inh.torate(noisy_g)
 
     # bin g and the letters (information calculations will now use these binned versions)
     # if using binning_type = 1 I might want to define the bins on the gating window rather than with the whole range of times. Imagine having a saccade once in a blue moon, then defining bins based on percentiles will result in gating contributing very little to defining the bins. As a result, during gating bins, rather than being uniformly distributed, will be heavily occupied in the borders (U shape) and information will decrease.
+    # digitize works on 1d array but not nd arrays. So I pass the flattened version of x and then reshape back into x's original shape at the end
     print('Digitizing linear prediction and responses')
     binning_type = 1     # 1: uses percentiles, 0: equidistant bins
     # bin g, basal an dgating using percentiles defined during gating
@@ -132,11 +135,9 @@ def data_summary():
     binned_basal    = _np.digitize(basal_letters.flatten(), bins).reshape(basal_letters.shape)
     bins = _np.percentile(gating_letters[:, time_to_point(.12,0)], percentiles)
     binned_gating   = _np.digitize(gating_letters.flatten(), bins).reshape(gating_letters.shape)
+    binned_inh      = _np.digitize(inh_letters.flatten(), bins).reshape(inh_letters.shape)
 
-    # digitize works on 1d array but not nd arrays. So I pass the flattened version of x and then reshape back into x's original shape at the end
-    #binned_g        = _info.binned(noisy_g, binsN, binning_type)
-    #binned_basal    = _info.binned(basal_letters, binsN, binning_type)
-    #binned_gating   = _info.binned(gating_letters, binsN, binning_type)
+    # save just a few samples of g and letters (at only -.1 and .1 secs) for displaying purposes
     binned_g[:,time_to_point(-.1,0)].tofile('Data/binned_g_preSac')
     binned_basal[:,time_to_point(-.1,0)].tofile('Data/binned_basal_preSac')
     binned_gating[:,time_to_point(-.1,0)].tofile('Data/binned_gating_preSac')
@@ -149,46 +150,82 @@ def data_summary():
     binned_g        = tuple(map(tuple, binned_g.T))
     binned_basal    = tuple(map(tuple, binned_basal.T))
     binned_gating   = tuple(map(tuple, binned_gating.T))
+    binned_inh      = tuple(map(tuple, binned_inh.T))
 
-    # computing information under both basal and gating using one and two letters
-    print('Computing total information under both basal and gating nl uisng one and two letters')
+    # make a binned version that takes letters form basal, gating and inh depending on overlap between time and peripheral pathway
+    gating_start_p  = time_to_point(gating_start_t, 0)
+    gating_end_p    = time_to_point(gating_end_t, 0)
+    inh_end_p       = time_to_point(inhibition_end_t, 0)
+    binned_mixed    = binned_basal[:gating_start_p] + binned_gating[gating_start_p:gating_end_p] + binned_inh[gating_end_p:inh_end_p] + binned_basal[inh_end_p:]
+
+    basal_total_info = get_total_info_since_t0(binned_g, binned_basal, -.2)
+    basal_total_info.tofile('Data/basal_total_info')
+    mixed_total_info = get_total_info_since_t0(binned_g, binned_mixed, -.2)
+    mixed_total_info.tofile('Data/mixed_total_info')
+
+    return 1
+    """
+    # computing information under basal, gating and inh using one and two letters
+    print('Computing total information under basal uisng one letter')
     basal_info_1L   = get_info(binned_g, [binned_basal], letter_length)
+    basal_info_1L.tofile('Data/mi_1b_0g_0i_{0}ms'.format(int(1000*letter_length)))
+
+    print('Computing total information under basal uisng two letters')
     basal_info_2L   = get_info(binned_g, [binned_basal, binned_basal], letter_length)
+    basal_info_2L.tofile('Data/mi_2b_0g_0i_{0}ms'.format(int(1000*letter_length)))
+    
+    print('Compute total information with N letters under basal or where the letters are taken from binned_mixed')
+    for N in [2]:
+        # if 2 letters, the basal condition was just computed in he line above. Don't do it again
+        if N != 2:
+            basal_info   = get_info(binned_g, [binned_basal]*N, letter_length)
+            basal_info.tofile('Data/mi_{0}b_0g_0i_{1}ms'.format(N, int(1000*letter_length)))
+        mixed_info   = get_info(binned_g, [binned_mixed]*N, letter_length)
+        mixed_info.tofile('Data/mi_{0}m_{1}ms'.format(N, int(1000*letter_length)))
+
     #gating_info_1L  = get_info(binned_g, [binned_gating], letter_length)
     #gating_info_2L  = get_info(binned_g, [binned_gating, binned_gating], letter_length)
-    basal_info_1L.tofile('Data/mi_1b_0g_{0}ms'.format(int(1000*letter_length)))
-    basal_info_2L.tofile('Data/mi_2b_0g_{0}ms'.format(int(1000*letter_length)))
     #gating_info_1L.tofile('Data/mi_0b_1g_{0}ms'.format(int(1000*letter_length)))
     #gating_info_2L.tofile('Data/mi_0b_2g_{0}ms'.format(int(1000*letter_length)))
 
-    # compare the amount of information gained by the last letter (out of 2) in three different cases:
+    # compare the amount of information gained by the last letter (out of 2) in several different cases:
     #   i.      both letters are under basal state
     #   ii.     both letters are gating
     #   iii.    first letter is basal, second is gating.
-    # For this, I do need to bin both g and letters.
+    #   iv.     both letters under inh
     print('Computing information last letter carries about g in a 2L word when all letters come form basal nl')
     basal_cond_info = get_cond_info(binned_g, [binned_basal, binned_basal], letter_length)
-    basal_cond_info.tofile('Data/cond_mi_2b_0g_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
-    """
+    basal_cond_info.tofile('Data/cond_mi_2b_0g_0i_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
     print('Computing information last letter carries about g in a 2L word when all letters come form gating nl')
     gating_cond_info = get_cond_info(binned_g, [binned_gating, binned_gating], letter_length)
-    gating_cond_info.tofile('Data/cond_mi_0b_2g_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "0b_2g_" means 0 basal and 2 gating letters went into the word
-    print('Computing information last letter carries about g in a 2L word when 1st letter comes form basal and 2nd from gating nl')
-    mixed_cond_info = get_cond_info(binned_g, [binned_basal, binned_gating], letter_length)
-    mixed_cond_info.tofile('Data/cond_mi_1b_1g_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "1b_1g_" means 1 basal and 1 gating letters went into the word
+    gating_cond_info.tofile('Data/cond_mi_0b_2g_0i_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "0b_2g_" means 0 basal and 2 gating letters went into the word
+    """
+    print('Computing information last letter carries about g in a 2L word when letters come form binned_mixed')
+    mixed_cond_info = get_cond_info(binned_g, [binned_mixed, binned_mixed], letter_length)
+    mixed_cond_info.tofile('Data/cond_mi_2m_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "1b_1g_" means 1 basal and 1 gating letters went into the word
+    return 1
+
+    print('Computing information last letter carries about g in a 2L word when both letters comes form inh window')
+    inh_cond_info = get_cond_info(binned_g, [binned_inh, binned_inh], letter_length)
+    inh_cond_info.tofile('Data/cond_mi_0b_0g_2i_{0}ms'.format(int(1000*letter_length)))         # b_: basal and g_: gating "1b_1g_" means 1 basal and 1 gating letters went into the word
 
     # compare the amount of information gained by the last letter, when multiple letters exist
     for i in [4, 8]:
         print('Computing information last letter carries about g when all letters come from basal nl and N = {0}'.format(i))
         basal_cond_info = get_cond_info(binned_g, [binned_gating]*i, letter_length)
-        basal_cond_info.tofile('Data/cond_mi_0b_{0}g_{1}ms'.format(i, int(1000*letter_length)))        
+        basal_cond_info.tofile('Data/cond_mi_0b_{0}g_{1}ms'.format(i, int(1000*letter_length)))
     
     # compare the amount of new information the last letter carries in 2 letter words as a function of letter length
     for i in [5, 25, 125]:
         print('Computing 2L cond. information from basal nl when letter length is {0}'.format(i))
         basal_cond_info = get_cond_info(binned_g, [binned_gating]*2, i/1000)
         basal_cond_info.tofile('Data/cond_mi_2b_0g_{0}ms'.format(i))
-    """
+
+    _pdb.set_trace()
+    # I'm going to compute how redundant letters after gating are with letters during gating. Instead of writing a new method, I'm creating a new array of binned_letters that has at all times, the response at gating time and passing those letters as the conditional ones to get_cond_info
+    print('Compute information that 1L carries about g, conditional on a measurement at gating time')
+    gating_letter = (binned_basal[time_to_point(.12,0)],)*len(binned_basal)
+    basal_cond_info = get_cond_info(binned_g, [gating_letter, binned_basal], letter_length)
 
     # make all plots
     plot_summary()
@@ -202,8 +239,8 @@ def plot_summary():
     bipolar = cell()
 
     # plot some linear predictions
-    plot_g(g, 100)
-    
+    fig_g = plot_g(g, 100)
+
     #fig, ax = plot_compare_letters_N(int(letter_length*1000), lettersN_list=[1, 2,3], nameout='Compare Letters N A')
     #fig, ax = plot_compare_letters_N(int(letter_length*1000), lettersN_list=[2,3], nameout='Compare Letters N B')
     #fig, ax = plot_compare_letters_N(int(letter_length*1000), lettersN_list=[1], nameout='Compare Letters N C', )
@@ -216,11 +253,11 @@ def plot_summary():
     plot_letter_length()
 
     # plot how the simulation compares to gaussian flickering and the basal and gating nl
-    bipolar.plot_gaussian_simulation_and_nls(g, 9, -.1, [bipolar.nl_basal, bipolar.nl_gating])
+    bipolar.plot_gaussian_simulation_and_nls(g, 9, -.1, [bipolar.nl_basal, bipolar.nl_gating, bipolar.nl_inh])
 
     # plot one TNF_psth and the result of fitting the model ot it
     still_psth, sac_psth, tax = load_TNF_PSTHs()
-    bipolar._fit_PSTH(sac_psth[1,:], 'pink', .1, 127, 96000, 96, range(0, 200,10), range(-50, 150, 10), 1)
+    bipolar._fit_PSTH(sac_psth[1,:], 'pink', .1, 128, 96000, 96, range(0, 200,10), range(-50, 150, 10), 1)
     
     plot_calcium_information()
 
@@ -230,7 +267,9 @@ def plot_summary():
 
     plot_binned_density()
     
-    bipolar.plot_noise(g)
+    bipolar.plot_noise(g, fig_g)
+
+    fig = bipolar.plot_noise_model()
 
     bipolar.plot_noise_correlation(g)
     
@@ -424,28 +463,37 @@ def plot_g(g, num):
         traces.append(ax.plot(tax, g[index,:]))
 
     # add dash line at saccade
-    traces.append(ax.plot((0,0), (-5,5), 'k:'))
+    traces.append(ax.plot((0,0), ax.get_ylim(), 'k:'))
 
     # add labels
-    ax.set_xlabel('Time (s)', fontsize=10)
+    ax.set_xlabel(r'$Time\, (s)$', fontsize=10)
     #ax.set_ylabel('Linear Prediction (AU)')
-    ax.set_ylabel('Filtered\nlight (AU)', fontsize=10)
+    ax.set_ylabel(r'$Filtered\, stimulus, (AU)$', fontsize=10, labelpad=0)
     
-    ax.xaxis.set_ticks_position('bottom')
-    ax.yaxis.set_ticks_position('left')
-    # adjust bottom margin so that label is shown
-    fig.subplots_adjust(left=.25, bottom=.35)
 
-    ax.set_xticks((-.2, 0, .2, .4, .6))
-    ax.set_xticklabels((-.2, 0, .2, .4, .6), color='k', fontsize=10)
+    xticks = _np.arange(-.2, .8, .4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
     #ax.set_yticks((-5, 0, 5))
     ax.set_xlim(-.2, .8)
-    #ax.set_yticklabels([])
+    ylim = ax.get_ylim()
+    maxY = max(-ylim[0], ylim[1])
+
+    ax.set_yticks([-maxY*.8, maxY*.8])
+    ax.set_yticklabels([-1,1], fontsize=10)
     #ax.yaxis.set_visible(False)
 
-    #fig.set_size_inches(2, 1.5)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    ax.tick_params(length=3, right='off', top='off')
+
+    fig.subplots_adjust(left=.25, bottom=.35, top=1, right=1)
+    fig.set_size_inches(2, 1.5)
     fig.savefig('Figures/g.pdf', transparent=True)
-    return fig, ax, traces
+
+    return fig
+
 
 def plot_calcium_information():
     '''
@@ -460,18 +508,87 @@ def plot_calcium_information():
     _plt.close('calcium_information')
     fig, ax = _plt.subplots(num='calcium_information')
 
-    ax.plot(tax, gating_info_1L, 'b', lw=2, label="0b 1g")
+    ax.plot(tax, gating_info_1L, 'b', lw=2, label="gating")
     #ax.plot(tax, gating_info_2L, ':b', lw=2, label="0b 2g")
-    ax.plot(tax, basal_info_1L, 'r', lw=2, label="1b 0g")
+    ax.plot(tax, basal_info_1L, 'r', lw=2, label="basal")
     #ax.plot(tax, basal_info_2L, ':r', lw=2, label="2b 0g")
 
-    ax.legend()
-    ax.set_xlim(-.2, .8)
-    ax.set_xlabel(r'$Time (s)$')
-    ax.set_ylabel(r'$Information (Bits)$')
+    ax.plot([0,0], (0, ax.get_ylim()[1]), ':k', label='_nolegend_')
 
-    fig.savefig('Figures/calcium_information.pdf')
+    ax.legend(fontsize=10, handlelength=1, frameon=False, loc='lower center')
+    xticks=_np.arange(-.2,.8,.4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    yticks=range(0,3,1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlim(-.2, .8)
+    ax.set_ylim(0, ax.get_ylim()[1])
+    ax.tick_params(length=3, top='off', right='off')
+    ax.set_xlabel(r'$Time\, (s)$')
+    ax.set_ylabel(r'$Information\, (Bits)\,\,$')
+
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    fig.subplots_adjust(bottom=.20, left=.2,right=1, top=1)
+    fig.set_size_inches(2.5,2)
+    fig.savefig('Figures/calcium_information.pdf', transparent=True)
     
+    return fig
+
+def plot_information():
+    '''
+    Load and plot mutual information between binned g and 1 letter words with basal and gating nl
+    Also plot conditional information between last letter and g given the previous letter.
+   
+    All gating plots are in blue, basal in red, 1 letter info are lines and cond info are dotted lines
+    '''
+    tax = _getTAX()
+    basal_info = _np.fromfile('Data/mi_1b_0g_50ms')
+    basal_cond_info = _np.fromfile('Data/cond_mi_2b_0g_50ms')
+    gating_info = _np.fromfile('Data/mi_0b_1g_50ms')
+    gating_cond_info = _np.fromfile('Data/cond_mi_0b_2g_50ms')
+    
+    _plt.close('information')
+    fig, ax = _plt.subplots(num='information')
+
+    ax.plot(tax, gating_info, 'b', lw=2)
+    ax.plot(tax, gating_cond_info, ':b', lw=2)
+    ax.plot(tax, basal_info, 'r', lw=2)
+    ax.plot(tax, basal_cond_info, ':r', lw=2)
+
+    ax.plot([0,0], (0, ax.get_ylim()[1]), ':k', label='_nolegend_')
+
+    xticks=_np.arange(-.2,.8,.4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    yticks=range(0,3,1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlim(-.2, .8)
+    ax.set_ylim(0, ax.get_ylim()[1]+1)
+    ax.set_xlabel(r'$Time\n (s)$')
+    ax.set_ylabel(r'$Information\, (Bits)\,\,$')
+
+    ax.tick_params(length=3, top='off', right='off')
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    fig.subplots_adjust(bottom=.20, left=.2,right=.95, top=.95)
+    fig.set_size_inches(2.5,2)
+    
+    ax.text(-.15, 3.6, r'$gating$', color='blue', size=10)
+    ax.text(-.15, 2.9, r'$basal$', color='red', size=10)
+    ax.plot((-.5,- .6), (.1, .1), 'k', label = r'$I(g;L_1)$')
+    ax.plot((-.5,-.6), (.2, .2), ':k', label = r'$I(g;L_1\mid L_0)$')
+    ax.legend(loc = 'upper center', bbox_to_anchor=(.75, 1.05), frameon=False, fontsize=10, handlelength=2)
+
+    fig.savefig('Figures/calcium_information.pdf', transparent=True)
+    return fig
+
 def plot_firing_rate_hist(firingRate):
     '''
     firingRate is a 2D ndarray such that firingRate[:,i] is the firing rate in a given condition.
@@ -493,8 +610,8 @@ def _plot_word_cond_info(tax, nogating_info, nogating_rate, gating_info, gating_
     _plt.close('gating_vs_FEM_Word_cond_info')
     fig, ax = _plt.subplots(num='gating_vs_FEM_Word_cond_info')
     traces = []
-    traces.append(ax.plot(tax, nogating_info, 'b', lw=2, label='no gating'))
-    traces.append(ax.plot(tax, gating_info, 'r', lw=2, label='gating'))
+    traces.append(ax.plot(tax, nogating_info, 'b', lw=2, label=r'$basal$'))
+    traces.append(ax.plot(tax, gating_info, 'r', lw=2, label=r'$gating$'))
     traces.append(ax.plot([0,0], ax.get_ylim(), 'k:', label='_nolabel_'))
 
     ax.legend(loc='center right', fontsize=10, bbox_to_anchor=(1,.71), frameon=False, handlelength=.5, handletextpad=.1)
@@ -509,8 +626,8 @@ def _plot_word_cond_info(tax, nogating_info, nogating_rate, gating_info, gating_
     ax.xaxis.set_ticks_position('bottom')
     ax.yaxis.set_ticks_position('left')
 
-    ax.set_xlabel('Time (s)',fontsize=10)
-    ax.set_ylabel('Information (Bits)',fontsize=10)
+    ax.set_xlabel(r'$Time\n (s)$',fontsize=10)
+    ax.set_ylabel(r'$Information\, (Bits)$',fontsize=10)
     ax.yaxis.set_label_coords(-.25, .40)
     fig.subplots_adjust(bottom=.3, left=.25, right=1, top=1)
 
@@ -522,8 +639,8 @@ def _plot_word_cond_info(tax, nogating_info, nogating_rate, gating_info, gating_
     _plt.close('word_rate')
     fig = _plt.figure('word_rate')
     ax = fig.add_subplot(1,1,1)
-    ax.plot(nogating_tax, nogating_rate, 'b', lw=2, label='fem')
-    ax.plot(gating_tax, gating_rate, 'r', lw=2, label='gating')
+    ax.plot(nogating_tax, nogating_rate, 'b', lw=2, label=r'$basal$')
+    ax.plot(gating_tax, gating_rate, 'r', lw=2, label=r'$gating$')
     ax.legend()
 
 def sigmoids_plot(name, tax, data, sigmoids):
@@ -662,18 +779,16 @@ def explore_one_cell_nl(g, time, nls, bin_rate=None):
     #ax.legend(bbox_to_anchor=(1.4,.75), fontsize=10, handlelength=.5, frameon=False)
     fig.savefig('Figures/LP_and_sigmoids.pdf', transparent=True)
     
-    return fig, ax1
+    return fig
 
 
-def plot_compare_nls(letterLength, gating_start_t, gating_end_t):
+def plot_compare_nls(letterLength):
     '''
     Figure to compare I(g(t0); g(t0)+n | all other letters in the word)
     
-    Search in current directory for files of the form 'cond_mi_{0}b_{1}g_{2}ms where {0} is the number of letters under basal; {1} is the number of letters under gating and {2} is the length of each letter
-
     output:
     -------
-        Generates and saves plot 'Figures/LettersN'
+        Generates and saves plot 'Figures/compare_nls'
         
     '''
     _plt.close('compare_nls')
@@ -682,8 +797,10 @@ def plot_compare_nls(letterLength, gating_start_t, gating_end_t):
     #_pdb.set_trace()
     # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
     basal_2L = _np.fromfile('Data/cond_mi_2b_0g_{0}ms'.format(letterLength))
-    gating_2L = _np.fromfile('Data/cond_mi_0b_2g_{0}ms'.format(letterLength))
+    #gating_2L = _np.fromfile('Data/cond_mi_0b_2g_{0}ms'.format(letterLength))
+    mixed_2L = _np.fromfile('Data/cond_mi_2m_{0}ms'.format(letterLength))
 
+    """
     start_p = time_to_point(gating_start_t, 0)
     end_p = time_to_point(gating_end_t, 0)
 
@@ -691,11 +808,15 @@ def plot_compare_nls(letterLength, gating_start_t, gating_end_t):
     mixed[start_p:end_p] = gating_2L[start_p:end_p]
 
     # get the tax if it doesn't exist
+    #ax.plot(tax[:start_p], mixed[:start_p], 'r', lw=2)
+    #ax.plot(tax[start_p-1:end_p+1], mixed[start_p-1:end_p+1], 'b', lw=2)
+    #ax.plot(tax[end_p:], mixed[end_p:], 'r', lw=2)
+    """
     tax = _getTAX()
-    ax.plot(tax[:start_p], mixed[:start_p], 'r', lw=2)
-    ax.plot(tax[start_p-1:end_p+1], mixed[start_p-1:end_p+1], 'b', lw=2)
-    ax.plot(tax[end_p:], mixed[end_p:], 'r', lw=2)
+    ax.plot(tax, basal_2L+basal_2L.max()/100, 'r', lw=2, label = r'$basal$')
+    ax.plot(tax, mixed_2L, 'b', lw=2, label=r'$gating$')
 
+    #ax.plot(tax, mixed, 'b', lw=2, label=r'$gating$')
     #ax.plot(tax, cond_mi_4L, '-.r', lw=2, label='4L')
     #ax.plot(tax, cond_mi_8L, '--r', lw=2, label='8L')
 
@@ -705,30 +826,32 @@ def plot_compare_nls(letterLength, gating_start_t, gating_end_t):
     ax.plot((0,0), ax.get_ylim(), 'k:', label='_nolegend_')
 
     ax.set_xlim(-.2, .8)
-    #ax.set_ylim(-.1, ax.get_ylim()[1])
-    #ax.legend(loc=9, fontsize=10, ncol=3, handlelength=1, handletextpad=.25, columnspacing=1, frameon=False, bbox_to_anchor=(.5,1.10))#, frameon=False)
     ax.legend(loc='center right', fontsize=10, handlelength=1, handletextpad=.25, frameon=False, bbox_to_anchor=(1,.7))#, frameon=False)
-    
     ax.xaxis.set_ticks_position('bottom')
     ax.yaxis.set_ticks_position('left')
 
-    ax.set_xlabel(r'$Time (s)$', fontsize=10)
-    ax.set_ylabel(r'$Information (Bits)$', fontsize=10)
-    #ax.yaxis.set_label_coords(-.15, .4)
-    ax.set_title('g( g(t)+n; g(t) | all other letters)\ncomparing different word lengths')
+    ax.set_xlabel(r'$Time\, (s)$', fontsize=12)
+    ax.set_ylabel(r'$Information\, (Bits)$', fontsize=12)
+    ax.yaxis.set_label_coords(-.10, .4)
+    #ax.set_title('g( g(t)+n; g(t) | all other letters)\ncomparing different word lengths')
    
-    #ax.set_xticks((0, .5))
-    #ax.set_xticklabels((0, .5), size=10)
-    #ax.set_yticks((0, 1))
-    #ax.set_yticklabels((0,1), size=10)
+    xticks = _np.arange(-.2, .8, .4)
+    yticks = range(0, int(ax.get_ylim()[1]), 1)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, size=10)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, size=10)
 
-    
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3)
+
     # add margin for axis labels
-    #fig.subplots_adjust(bottom=.3, left=.2, right=1, top=1)
-    #fig.set_size_inches(2.5, 1.5)
-    fig.savefig('Figures/compare_nls.pdf')
+    fig.subplots_adjust(bottom=.2, left=.2, right=1, top=1)
+    fig.set_size_inches(2.5, 2)
+    fig.savefig('Figures/compare_nls.pdf', transparent=True)
 
-    return fig, ax
+    return fig
 
 def plot_letter_length():
     '''
@@ -753,6 +876,11 @@ def plot_letter_length():
 
     _plt.plot((0,0), (0, ax.get_ylim()[1]), 'k:', label='_nolabel_')
 
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    return fig
+    
     """
     ax.set_xlim(-.2, .8)
     ax.set_ylim(0, 1.2)
@@ -772,22 +900,10 @@ def plot_letter_length():
     ax.set_title('I( g(t)+n; g(t) | all other letters and lettersN={0})\ncomparing different letters length'.format(lettersN))
     
     fig.set_size_inches(2.5, 1.5)
-    fig.savefig('Figures/letterLengthRedundancy.pdf')
+    fig.savefig('Figures/letterLengthRedundancy.pdf', transparent=True)
 
     return fig, ax
     """
-
-def plot_rate_increase(rate_array):
-    """_plt.close('rate_increase')
-    fig, ax = _plt.subplots(num='rate_increase')
-    ax.matshow(rate_array)
-
-    cbar = fig.colorbar(ax, interpolation='nearest', vmin=0.5, vmax=.99)#, ticks=[1, 1, 2])
-    #cbar.ax.set_yticklabels(['< -1', '0', '> 1'])# vertically oriented colorbar
-    """
-    _plt.imshow(rate_array)
-    _plt.colorbar()
-
 
 def plot_gating_effect(letter_length):
     from os import listdir
@@ -809,7 +925,9 @@ def plot_gating_effect(letter_length):
     ax.set_xlim(-.2, .8)
 
     fig.set_size_inches(2, 2)
-    fig.savefig('Figures/gating_effect.pdf')
+    fig.savefig('Figures/gating_effect.pdf', transparent=True)
+
+    return fig
 
 def plot_word_info(lettersN_list=None, length_list=None):
     '''
@@ -832,8 +950,8 @@ def plot_word_info(lettersN_list=None, length_list=None):
         lettersN = int(tokens[3][:-1])
         length = int(tokens[4][:-2])
         if (lettersN_list is None or lettersN in lettersN_list) and (length_list is None or length in length_list):
-            ax.plot(_getTAX(), _np.fromfile('Data/'+name), 'b', label = 'gating', lw=2)
-            ax.plot(_getTAX(), _np.fromfile('Data/non'+name), 'r', label = 'no gating', lw=2)
+            ax.plot(_getTAX(), _np.fromfile('Data/'+name), 'b', label = r'$gating$', lw=2)
+            ax.plot(_getTAX(), _np.fromfile('Data/non'+name), 'r', label = r'$basal$', lw=2)
 
     # add dotted line at 0
     ax.plot([0,0], ax.get_ylim(), ':k', label = '_nolabel_')
@@ -857,15 +975,17 @@ def plot_word_info(lettersN_list=None, length_list=None):
     ax.text(0.3, ax.get_ylim()[1]*.60, r'$gating$', color='b')
     ax.text(0.3, ax.get_ylim()[1]*.35, r'$no gating$', color='r')
 
-    ax.set_xlabel('Time (s)', fontsize=10)
-    ax.set_ylabel('Infomration (Bits)', fontsize=10)
+    ax.set_xlabel(r'$Time\, (s)$', fontsize=10)
+    ax.set_ylabel(r'$Infomration\, (Bits)$', fontsize=10)
     ax.yaxis.set_label_coords(-.25, .4)
     
     # add margin for axis labels
     fig.subplots_adjust(bottom=.35, left=.25, right=1, top=1)
 
     fig.set_size_inches(2, 1.5)
-    fig.savefig('Figures/word_info.pdf')
+    fig.savefig('Figures/word_info.pdf', transparent=True)
+
+    return fig
 
 def plot_binned_density():
     '''
@@ -896,12 +1016,15 @@ def plot_binned_density():
     ax[2].set_xlim(1,16)
 
     ax[0].text(14, .08, 'LP')
-    ax[1].text(14, 1, 'basal')
-    ax[2].text(14, .5, 'gating')
+    ax[1].text(14, 1, r'$basal$')
+    ax[2].text(14, .5, r'$gating$')
 
     ax[1].legend(loc='upper left')
 
-    fig.savefig('Figures/binned_density.pdf')
+    fig.savefig('Figures/binned_density.pdf', transparent=True)
+
+    return fig
+
 
 def plot_letters_N(letterLength):
     '''
@@ -923,17 +1046,75 @@ def plot_letters_N(letterLength):
 
     # get the tax if it doesn't exist
     tax = _getTAX()
-    ax.plot(tax, mi_1L, 'r', lw=2, label='1L')
-    ax.plot(tax, cond_mi_2L, ':r', lw=2, label='2L')
+    ax.plot(tax, mi_1L, 'r', lw=2, label=r'$1L$')
+    ax.plot(tax, cond_mi_2L, ':r', lw=2, label=r'$2L$')
     #ax.plot(tax, cond_mi_4L, '-.r', lw=2, label='4L')
     #ax.plot(tax, cond_mi_8L, '--r', lw=2, label='8L')
 
-    ax.legend()
+    ax.plot([0,0], ax.get_ylim(), ':k', label='_nolegend_')
 
-    fig.savefig('letters_N.pdf')
+    ax.legend(fontsize=10, handlelength=1.1, frameon=False)
 
+    xticks = _np.arange(-.2, .8, .4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    yticks = range(0, int(ax.get_ylim()[1]+1), 1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlim(-.2, .8)
+
+    ax.tick_params(right='off', top='off', length=3)
+    ax.set_xlabel(r'$Time\,(s)$')
+    ax.set_ylabel(r'$Informaton\,(Bits)$')
+    
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    fig.subplots_adjust(left=.2, bottom=.2, right=1, top=1)
+    fig.set_size_inches(2.5, 2)
+    fig.savefig('Figures/letters_N.pdf', transparent=True)
+
+    return fig
+
+
+def plot_pink_stim():
+    '''
+    Plot a vew seconds of pink stimulus
+    '''
+    length = 10  # in seconds
+    length /= sim_delta_t   # in samples
+    length /= _np.round(.03/sim_delta_t)
+    stim = _pn.pink(int(length)).reshape(-1, 1)*_np.ones((1, _np.round(.03/sim_delta_t)))
+    stim = stim.reshape(-1,1)
+    _plt.close('pink_stim')
+    fig, ax = _plt.subplots(num='pink_stim')
+    
+    ax.plot(stim, 'k')
+
+    fig.savefig('Figures/pink_stim.pdf', transparent=True)
+
+    return fig
+
+"""
+def clean_plot(fig, output_name="", axis=True, ticks=True, ticklabels=True, axeslabels=True, figtitle=True, axtitle=True, spines):
+    '''
+    given a fig, get all the axes and remove all objects that are Trued
+    if output_name is not "", save the fig with the given name
+    '''
+    axes = fig.get_axes()
+    for ax in axes:
+        if axis:
+            ax.set_axis_off()
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    if output_name != "":
+        fig.savefig(output_name)
+    
 # plots go here
-
+"""
 
 def information(cov, X):
     '''
@@ -1346,6 +1527,33 @@ def _get_words(letter_times, gating_start_t, gating_end_t, g, covG, nogating_nl,
     words[:,i] = _info.binned(words, binsN, 0)
 
     return words
+
+def get_total_info_since_t0(binned_g, letters, t0):
+    '''
+    For every time point t >= t0, compute I(g(t); letters(t) | all g's and letters between to and t)
+    
+    This is the total information that a system accumulates over time
+    '''
+
+    #_pdb.set_trace()
+    p0 = time_to_point(t0,0)
+    #delta_p = time_to_point(letter_length,0)
+    sub_g = ()
+    sub_L = ()
+
+    total_info = _np.zeros(len(binned_g))
+
+    delta_p=1
+    for p in range(p0, len(binned_g), delta_p):
+        sub_g = sub_g + (binned_g[p],)
+        sub_L = sub_L + (letters[p],)
+        tup_g = tuple(zip(*sub_g))
+        tup_L = tuple(zip(*sub_L))
+
+        total_info[p] = _info.mi(tup_g, tup_L)
+
+    return total_info
+
 
 def get_info(binned_g, letters_list, letter_length):
     '''
@@ -2402,8 +2610,13 @@ def plot_stats_from_TNF_fits():
     ax[0].hist(df['peri_weight'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
     ax[1].hist(df['nl_thresh'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
     
-    fig.savefig('TNF_fit_stats.pdf')
-    return df['peri_weight'].mean(), df['peri_weight'].std(), df['nl_thresh'].mean(), df['nl_thresh'].std() 
+    ax[0].spines['top'].set_visible(False)
+    ax[0].spines['right'].set_visible(False)
+    ax[1].spines['top'].set_visible(False)
+    ax[1].spines['right'].set_visible(False)
+
+    fig.savefig('Figures/TNF_fit_stats.pdf', transparent=True)
+    return fig, df['peri_weight'].mean(), df['peri_weight'].std(), df['nl_thresh'].mean(), df['nl_thresh'].std() 
     
 def _test_adaptation(contrast_list, filter_instance, nl, adaptation_block):
     _plt.close('adaptation_test')
@@ -2576,7 +2789,7 @@ class nonlinear_block:
 
         _plt.close('test_gating')
         fig, ax = _plt.subplots(num='test_gating')
-        ax.hist([lp, nongating, gating], labels=['lp', 'nongating', 'gating'])
+        ax.hist([lp, nongating, gating], labels=[r'$lp$', r'$basal$', r'$gating$'])
         ax.legend()
     """
 
@@ -2746,6 +2959,7 @@ class cell:
         # Define internal threshold
         self.nl_basal = nonlinear_block(nl_type, nl_basal_threshold, nl_units)
         self.nl_gating = nonlinear_block(nl_type, nl_gating_threshold, nl_units)
+        self.nl_inh = nonlinear_block(nl_type, nl_inh_threshold, nl_units)
 
         self.adaptation = adaptation_block(adaptation_type, adaptation_memory)
 
@@ -2897,10 +3111,10 @@ class cell:
         '''
         # load parameters from text file
         #global bipolar_cell_file
-        df = _pd.read_csv(bipolar_cell_file, sep=' ').sort('stim_sd').reset_index(drop=True)#, index_col='stim_sd')
+        df = _pd.read_csv(bipolar_cell_file, sep=' ').sort('exp_contrast').reset_index(drop=True)#, index_col='exp_contrast')
         
         # Simulate the experimental data
-        for i, contrast in enumerate(df['stim_sd']):
+        for i, contrast in enumerate(df['exp_contrast']):
             # compute the sd of the simulated membrane potential when using a gaussian distribution signal of the same contrast as the one used in the real experiment
             df.set_value(i, 'sim_mp_sd', self.sim_central_pathway('gaussian', contrast).std())
 
@@ -2912,12 +3126,7 @@ class cell:
 
         # the connection between the experiment and the simulation are the gaussian contrasts. For each gaussian contrast, express the noise as a fraction 
         if plot_flag:
-            _plt.close('noise SD to stim SD')
-            fig, ax = _plt.subplots(num='nose SD to stim SD')
-            ax.plot(df['sim_mp_sd'], df['sim_mp_noise'], 'ok')
-            ax.plot([10,120], [sim_noise_fit(10), sim_noise_fit(120)], 'k')
-            ax.set_xlabel('simulted stimulus sd')
-            ax.set_ylabel('simulated noise sd')
+            self.plot_noise_model()
 
         return sim_noise_fit
         
@@ -3072,63 +3281,156 @@ class cell:
         
         bins = 200
         # simulation data
-        for t in times:
+        colors = ((0,.75,0), (.75,.75,0))
+        for i, t in enumerate(times):
             point = time_to_point(t,0)
             data_to_hist = g[:,point]
         
             label = r'$t ={0: G}ms$'.format(int(1000*t))
-            hist, bins, patches = ax1.hist(data_to_hist, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=label)
+            #hist, bins, patches = ax1.hist(data_to_hist, color=(.6, .6, .6), bins=bins, normed=True, histtype='stepfilled', alpha=.995, label=label)
+            hist, bins, patches = ax1.hist(data_to_hist, color = colors[i], bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=label)
         
         # Gaussian, like in UFLicker
         for C in contrast:
             gaussian_g = self.sim_central_pathway('gaussian', C)
-            ax1.hist(gaussian_g, bins = bins, histtype='stepfilled', normed=True, alpha=.5, label='{0}% Gaussian'.format(C))
+            ax1.hist(gaussian_g, color=(0,1,1), bins = bins, histtype='stepfilled', normed=True, alpha=.5, label=r'${0}\%\, Contrast$'.format(C))
 
         if len(nls):
             ax2 = ax1.twinx()
         
         for i, nl in enumerate(nls):
-            if len(nls)==2 and i==0:
+            if len(nls) in [2,3] and i==0:
                 label = r'$basal$'
-            elif len(nls)==2 and i==1:
+                color = 'r'
+            elif len(nls) in [2,3] and i==1:
                 label = r'$gating$'
+                color = 'b'
+            elif len(nls) in [2,3] and i==2:
+                label = r'$inhibiting$'
+                color = ':b'
             else:
                 label = '_nolegend_'
+                color = 'g'
 
-            ax2.plot(bins, nl.torate(bins), lw=2, label=label)
+            ax2.plot(bins, nl.torate(bins), color, lw=2, label=label)
 
-        ax1.legend()
+        ax1.set_axis_off()
+        ax2.set_axis_off()
+        ax1.set_yticks([])
+        ax2.set_yticks([])
+        ax1.set_xticks([])
+        
+        ax1.set_xlim(-300,300)
+        #ax2.set_ylim( (0,ax2.get_ylim()[1]*.65) )
+        ax2.set_ylim((0, 500))
+        ax1.legend(fontsize=10, bbox_to_anchor=(1.1,1), handlelength=1, frameon=False)
         if len(nls):
-            ax2.legend(loc='upper left')
-
-        fig.savefig('Figures/gaussian_simulation_and_nls.pdf')
-        return fig, ax1
+            ax2.legend(loc='upper left', fontsize=10, handlelength=1, frameon=False)
 
 
-    def plot_noise(self, g):
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        fig.subplots_adjust(left=0, bottom=0, right=.9, top=1)
+        fig.set_size_inches(2.5,2)
+
+        fig.savefig('Figures/gaussian_simulation_and_nls.pdf', transparent=True)
+
+        return fig
+
+
+    def plot_noise_model(self):
+        '''
+        Plot the ratio between exp_mp_noise and exp_mp_sd as a function of stimulus contrast
+        '''
+        _plt.close('noise_model')
+        fig, ax = _plt.subplots(num='noise_model')
+
+        df = _pd.read_csv(bipolar_cell_file, sep=' ').sort('exp_contrast').reset_index(drop=True)#, index_col='exp_contrast')
+        print(df.columns)
+        #ratio = df['exp_mp_noise']/df['exp_mp_sd']
+        ratio = df['exp_mp_sd']/df['exp_mp_noise']
+        ax.plot(df['exp_contrast'], ratio, 'ok')
+        fit = _np.poly1d(_np.polyfit(df['exp_contrast'], ratio,1))
+        ax.plot([0,.4], [fit(0), fit(.4)], 'k')
+
+        # formating figure
+        #ax.set_axis_off()
+        ax.set_xlabel(r'$Contrast$', fontsize=10, labelpad=0)
+        ax.set_ylabel(r'$SNR$',fontsize=10, labelpad=-1)
+        xticks = _np.arange(0, .5, .2)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels((0, 20, 40), fontsize=10)    # actual x ticks are 0, .2 and .4 but I'm displaying it as %
+        yticks = range(0, 10, 5)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(yticks, fontsize=10)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        #ax.xaxis.set_ticks_position('bottom')
+        #ax.yaxis.set_ticks_position('left')
+        ax.set_ylim(.0, ax.get_ylim()[1]*1.1)
+        fig.subplots_adjust(bottom=.35, left=.2, right=1, top=1)
+        fig.set_size_inches(1.5,1)
+        ax.tick_params(axis='both', length=3,right='off', top='off')
+        fig.savefig('Figures/noise_model.pdf', transparent=True, pad_inches=0)
+        return fig
+
+
+    def plot_noise(self, g, fig_g):
         ''' 
         plot a few examples of the noise added to the mp and the STD that generated them.
+
+        fig_g is the fig handle that comes out of plot_g. I'm using it here to set the y axis identical to that of plot_g
         '''
+
+        #_pdb.set_trace()
 
         _plt.close('noise')
         fig, ax = _plt.subplots(num='noise')
 
-        tracesN = 20
+        tracesN = 30
         std = self.noise_model(g.std(axis=0))
         noise = self.get_noise((tracesN, g.shape[1]), std, noise_corr_time)
         tax = _getTAX()
 
         for i in range(tracesN):
-            ax.plot(tax, noise[i,:])
+            ax.plot(tax, noise[i,:], color='#BBBBBB', alpha=.2)
 
         ax.plot(tax, std, 'k', lw=2)
 
+
         ax.set_xlim(-.2, .8)
-        ax.set_xlabel(r'$Time (s)$')
-        ax.set_ylabel(r'$Membrane Potential Noise$')
+        ax.set_xlabel(r'$Time\, (s)$')
+        ax.set_ylabel(r'$V_m\, Noise$', labelpad=-10)
 
-        fig.savefig('nosie.pdf')
+        xticks = _np.arange(-.2, .8, .4)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xticks, fontsize=10)
 
+        # plot y axis to be 1/10 as in fig_g
+        fig_g_axes = fig_g.get_axes()[0]
+        yticks = fig_g_axes.get_yticks()
+        yticks = (yticks[0]/10, yticks[1]/10)
+        ylim = (1.1*yticks[0], 1.1*yticks[1])
+        ax.set_yticks(yticks)
+        ax.set_yticklabels([-0.1, 0.1], fontsize=10)
+        ax.set_ylim((ylim[0], ylim[1]))
+
+        # add doted line at time = 0
+        ax.plot([0,0], ax.get_ylim(), ':k', label='_nolegend_')
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(length=3, right='off', top='off')
+
+        fig.subplots_adjust(left=.25, bottom=.35, top=.95, right=1)
+        #fig.subplots_adjust(bottom=.35, left=.2, right=1, top=1)
+        fig.set_size_inches(2, 1.5)
+        fig.savefig('Figures/nosie.pdf', transparent=True)
+        
+        return fig
 
     def plot_noise_correlation(self, g):
         '''
@@ -3149,8 +3451,12 @@ class cell:
         ax.set_xlim(-2*noise_corr_time, 2*noise_corr_time)
         ax.set_ylim(-500, 10500)
 
-        fig.savefig('noise_correlation.pdf')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
+        fig.savefig('Figures/noise_correlation.pdf', transparent=True)
+        
+        return fig
 
     def _test_filtering(self, mean):
         '''
@@ -3244,27 +3550,32 @@ class cell:
         _plt.close('exp_and_simulated_PSTH')
         fig, ax = _plt.subplots(num='exp_and_simulated_PSTH')
 
-        ax.plot(tax, psth, lw=2)
-        ax.plot(tax, psth_sim, lw=2)
+        ax.plot(tax, psth, lw=2, label=r'$data$')
+        ax.plot(tax, psth_sim, lw=2, label=r'$simulation$')
 
-        # compute the error and display it
-        error = psth_sim - psth
+        xticks = _np.arange(0, .5, .25)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xticks, size=10)
+        yticks = range(0, 8, 2)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(yticks, size=10)
 
-        #ax.plot(tax, error)
-        error = error.std()
-        ax.set_title(r'$error = {0}$'.format(error))
+        ax.set_xlabel(r'$Time\, (s)$', size=12)
+        ax.set_ylabel(r'$Rate\, (Hz)$', size=12, labelpad=0)
 
-        # add next and previous buttons
-        ax_b0 = _plt.axes([.2, .9125, .1, .075])
-        b0 = Button(ax_b0, 'Prev')
+        ax.tick_params(length=3, right='off', top='off')
 
-        ax_b1 = _plt.axes([.8, .9125, .1, .075])
-        b1 = Button(ax_b1, 'Next')
+        ax.legend(loc='upper right', bbox_to_anchor = (1, 1), fontsize=10, handlelength=1, frameon=False)
+        fig.subplots_adjust(bottom = .30, left=.2,top=1,right=.95)
+        
 
-        b0.on_clicked(self._callback)
-        b1.on_clicked(self._callback)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
-        fig.savefig('Figures/exp_and_simulated_PSTH.pdf')
+        fig.set_size_inches(2,1.5)
+        fig.savefig('Figures/exp_and_simulated_PSTH.pdf', transparent=True)
+
+        return fig
 
     def _callback(self, event):
         import sys
