@@ -33,7 +33,7 @@ images_list = None
 tax = None
 
 # define parameters for analyzing words
-letter_length = .05
+letter_length = .025
 path_template='Data/#ms letter_length/'     #it will be initialized to Data/50ms letter_length or similar
 binsN = 16
 bin_rate = None
@@ -98,7 +98,7 @@ def data_summary():
     #noisy_g = bipolar.add_mp_noise(g, 0)
     print('computing and adding noise to g')
     noise_std = bipolar.noise_model(g.std(axis=0))
-    noisy_g = g + 1*bipolar.get_noise(g.shape, noise_std, noise_corr_time)
+    noisy_g = g + 1*bipolar.get_noise(g.shape, noise_std, noise_corr_time, save_flag=1)
     #noisy_g = g
 
     # Compute letters at all times under all nonlinearities
@@ -341,6 +341,95 @@ def load_TNF_PSTHs():
 
     return still_psth, sacc_psth, tax
 
+
+def get_cond_info(binned_g, letters_list):
+    '''
+    Compute I(g(t) ; letters_list[-1](t) | letters_list[:-1](at previous times))
+
+    the formula reads... Compute the mutual information between g at time t and the last letter at time t, given the previous letters measured.
+
+    
+    input:
+    ------
+        g:                  (2d ndarray) g[i,j] is the linear prediction for cell i at time point j
+
+        letters_list:       Each element of the list should be a 2d ndarray the same shape as g and holds the output of passing g through a given nonlinear object followed by binning
+
+    output:
+        cond_info:          at each point in time, I(x, y | z)
+    
+    Implementation notes:
+        for each point along the time axis, extract the last value of g (x), the last letter (y) and the previous letters (z). Then feed all that into _info.cond_mi(x, y, z)
+
+    '''
+    #_pdb.set_trace()
+
+    lettersN = len(letters_list)
+
+    cond_info = _np.zeros(len(binned_g))
+
+    #if lettersN > 2:
+    #    raise ValueError("naturalscenes.get_cond_info:\n I'm assuming in the implementation that there are exactly 2 letters.\n Expand implementation as needed")
+
+    # I can only compute the cond_info if last letter is such that the 1st letter is in the simulation. That means that I can't compute the cond_info for the first lettersN-1 points
+
+    for p in range(lettersN-1, len(binned_g)):
+        x = binned_g[p]
+
+        y = letters_list[-1][p]
+
+        z = ()
+        for i in range(lettersN-1):
+            # when lettersN is 2,   i=0 and letters are taken from letters_list[0][p-letters_delta_p]
+            # when lettersN is 3,   i=0-> letters_list[0][p-2*letters_delta_p]
+            #                       i=1-> letters_list[1][p-1*letters_delta_p]
+            z += (letters_list[i][p-(lettersN-i-1)],)
+        
+        newZ = _info.combine_labels(*z)
+        cond_info[p] = _info.cond_mi(x, y, newZ)
+
+    return cond_info
+
+
+def get_info(binned_g, letters_list):
+    '''
+    Compute I(g(t) ; letters_list[:](t and previous times))
+
+    the formula reads... Compute the mutual information between g at time t and all letters (spaced by letter_length) ending on time t.
+
+    
+    input:
+    ------
+        g:                  tuple of tuples, now g[i] means all g values at time point i and g[i][j] is linear prediction for cell j, time point i
+
+        letters_list:       Each element of the list should be a tuple of tuple as 'g', holding the output of passing g through a given nonlinear object followed by binning
+
+    output:
+        info:               at each point in time, I(x, y)
+    
+    Implementation notes:
+        for each point along the time axis, extract the last value of g (x), the set of N letters ending on time t (y). Then feed all that into _info.mi(x, y)
+
+    '''
+    #_pdb.set_trace()
+
+    lettersN = len(letters_list)
+
+    info = _np.zeros(len(binned_g))
+
+    # I can only compute the info if time is such that I can extract (lettersN-1) prior to current time. That means that for the first (lettersN-1) points I can't compute the information.
+    for p in range(lettersN-1, len(binned_g)):
+        x = binned_g[p]
+
+        y = ()
+        for i in range(lettersN):
+            # When there is only 1 letter in letters_list, N-i-1 = 0 and 'y' is taken at point 'p' as is 'x'. With two letters, first one is taken at 'p-letters_delta_p' and second one is taken at 'p'
+            y += (letters_list[i][p-(lettersN-i-1)],)
+        
+        newY = _info.combine_labels(*y)
+        info[p] = _info.mi(x, newY)
+
+    return info
 
 def average(array_in, pnts):
     '''
@@ -2845,7 +2934,7 @@ class cell:
 
         return mp +.001* noise
 
-    def get_noise(self, shape, std, corr_time):
+    def get_noise(self, shape, std, corr_time, save_flag=0):
         '''
         this is not well tested. I'm trying it out
 
@@ -2863,10 +2952,16 @@ class cell:
             else:
                 noise = _pn.pink(shape, depth=corr_time/sim_delta_t)    # here 'pn' is pinknoise, not a typo
 
-            _pdb.set_trace()
+            #_pdb.set_trace()
             noise -= noise.mean()
             noise *= std/noise.std()
-            noise.tofile('linear_prediction_noise')
+            if save_flag:
+                N = 14
+                print('*'*72)
+                print('*'+' '*N+'Saving Linear_prediction_noise'+' '*N+'*')
+                print('*'*72)
+
+                noise.tofile('linear_prediction_noise')
 
         return noise
 
@@ -2951,8 +3046,7 @@ class cell:
             shift = kernel[kernel_pnt]
 
             nl = self.nl_basal.copy()
-            nl.thresh += shift
-            print(nl.thresh)
+            nl.thresh -= shift
             gating_letters[:,p] = nl.torate(lp[:,p])
 
         return gating_letters
@@ -3096,7 +3190,7 @@ class cell:
 
         tracesN = 30
         std = self.noise_model(g.std(axis=0))
-        noise = self.get_noise((tracesN, g.shape[1]), std, noise_corr_time)
+        noise = self.get_noise(g.shape, std, noise_corr_time)
         tax = _get_simulation_TAX()
 
         for i in range(tracesN):
