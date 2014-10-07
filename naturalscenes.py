@@ -33,9 +33,8 @@ images_list = None
 tax = None
 
 # define parameters for analyzing words
-letter_length = .125
+letter_length = .05
 path_template='Data/#ms letter_length/'     #it will be initialized to Data/50ms letter_length or similar
-lettersN = 2
 binsN = 16
 bin_rate = None
 
@@ -81,7 +80,8 @@ def data_summary():
     global g, bin_rate, datapath
     
     #_pdb.set_trace()
-    datapath = 'Data/{0}ms letter_length/'.format(int(1000*letter_length))
+    letter_length_in_ms = int(1000*letter_length)
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
     makedirs(datapath, exist_ok=True)
 
     # generate a bipolar cell object.
@@ -95,29 +95,8 @@ def data_summary():
     print('Loading or computing g')
     g = bipolar.processAllImages()              # this will take several hours unless it is loading from a file
     
-    """
-    I'm commenting this out because I want to try to do every information with letters after the nonlinearity
-
-    # compute the covariance. I'll use the covariance both for estimating noise (from Yusuf's data) and to compute Shannon's Mutual Informaiton assuming gaussianity
-    print('Computing covG')
-    covG = _np.cov(g, rowvar=0)
-    covG.tofile(datapath+'LinearPredictionCov')
-
-    # adding noise that is uncorrelated in time to the simulation, is equivalent to adding a diagonal matrix (covN N:noise) to the LP covariance (covG), the diagonal values in covN are the variance of the noise at each point int time. I'm using Yusuf's data to pick at each point in time noise of the appropriate variance
-    covN = getNoiseCovariance(covG, sim_noise_fit, .05)
-    
-    # compare how information between 'g' and 'g+noise' changes when you incorporate more than one letter. There is no binning here. 
-    print('Computing I(g(t) ; g(t)+noise(t) | g+noise at previous times)\n as a function of lettersN ')
-    for _lettersN in [1,2,3]:
-        info_gained_by_last_letter(covG, covN, letter_length, _lettersN)
-    
-    # compare how new information changes as a funciton of letter size. Not binning here.
-    print('Computing I(g(t); g(t)+noise(t) | g(t-1)+noise(t-1) )\n as a function of letter_length')
-    for _letter_length in [.005, .025, .125]:
-        info_gained_by_last_letter(covG, covN, _letter_length, lettersN)
-    """
-
     #noisy_g = bipolar.add_mp_noise(g, 0)
+    print('computing and adding noise to g')
     noise_std = bipolar.noise_model(g.std(axis=0))
     noisy_g = g + 1*bipolar.get_noise(g.shape, noise_std, noise_corr_time)
     #noisy_g = g
@@ -125,16 +104,15 @@ def data_summary():
     # Compute letters at all times under all nonlinearities
     print('Computing letters at all times under both basal and gating nonlinearities')
     basal_letters = bipolar.nl_basal.torate(noisy_g)
-    gating_letters = bipolar.nl_gating.torate(noisy_g)
-    inh_letters = bipolar.nl_inh.torate(noisy_g)
+    gating_letters = bipolar.get_gating_letters(noisy_g)
 
     # make a 'mixed' version of letters that takes letters form basal, gating and inh depending on overlap between time and peripheral pathway
-    gating_start_p  = int((gating_start_t - sim_start_t)/sim_delta_t)
-    gating_end_p    = int((gating_end_t - sim_start_t)/sim_delta_t)
-    inh_end_p       = int((inhibition_end_t - sim_start_t)/sim_delta_t)
+    #gating_start_p  = int((gating_start_t - sim_start_t)/sim_delta_t)
+    #gating_end_p    = int((gating_end_t - sim_start_t)/sim_delta_t)
+    #inh_end_p       = int((inhibition_end_t - sim_start_t)/sim_delta_t)
     
     #_pdb.set_trace()
-    mixed_letters   = _np.concatenate((basal_letters[:, :gating_start_p], gating_letters[:, gating_start_p:gating_end_p], inh_letters[:, gating_end_p:inh_end_p], basal_letters[:, inh_end_p:]), axis=1)
+    #mixed_letters   = _np.concatenate((basal_letters[:, :gating_start_p], gating_letters[:, gating_start_p:gating_end_p], inh_letters[:, gating_end_p:inh_end_p], basal_letters[:, inh_end_p:]), axis=1)
 
     # Downsample simulation to have time step equivalent to letter_length. It should average g/basal/mixed over a letter.
     """
@@ -144,20 +122,20 @@ def data_summary():
     """
     noisy_g         = average(noisy_g, int(letter_length/sim_delta_t))
     basal_letters   = average(basal_letters, int(letter_length/sim_delta_t))
-    mixed_letters   = average(mixed_letters, int(letter_length/sim_delta_t))
+    gating_letters   = average(gating_letters, int(letter_length/sim_delta_t))
     preSacP = int((-.1-sim_start_t)/letter_length)
     postSacP = int((.1-sim_start_t)/letter_length)
     
     #_pdb.set_trace()
     noisy_g[:, preSacP].tofile(datapath+'g_preSac_nobinning')
     basal_letters[:, preSacP].tofile(datapath+'basal_letters_preSac_nobinning')
-    mixed_letters[:, preSacP].tofile(datapath+'mixed_letters_preSac_nobinning')
+    gating_letters[:, preSacP].tofile(datapath+'gating_letters_preSac_nobinning')
     noisy_g[:, postSacP].tofile(datapath+'g_postSac_nobinning')
     basal_letters[:, postSacP].tofile(datapath+'basal_letters_postSac_nobinning')
-    mixed_letters[:, postSacP].tofile(datapath+'mixed_letters_postSac_nobinning')
+    gating_letters[:, postSacP].tofile(datapath+'gating_letters_postSac_nobinning')
 
-    if not _np.all(basal_letters[:,0]==mixed_letters[:,0]):
-        print('basal_letters[:, 0] not equal to mixed_letters[:,0]')
+    if not _np.all(basal_letters[:,0]==gating_letters[:,0]):
+        print('basal_letters[:, 0] not equal to gating_letters[:,0]')
         _pdb.set_trace()
 
     # bin g and the letters (information calculations will now use these binned versions)
@@ -169,27 +147,27 @@ def data_summary():
     percentiles = list(_np.arange(0, 100.1, 100/binsN))
     bins = _np.percentile(noisy_g[:, int((.12-sim_start_t)/letter_length)], percentiles)
     binned_g        = _np.digitize(noisy_g.flatten(), bins).reshape(noisy_g.shape)
-    bins = _np.percentile(mixed_letters[:, int((.12-sim_start_t)/letter_length)], percentiles)
+    bins = _np.percentile(gating_letters[:, int((.12-sim_start_t)/letter_length)], percentiles)
     binned_basal    = _np.digitize(basal_letters.flatten(), bins).reshape(basal_letters.shape)
-    binned_mixed    = _np.digitize(mixed_letters.flatten(), bins).reshape(mixed_letters.shape)
+    binned_gating    = _np.digitize(gating_letters.flatten(), bins).reshape(gating_letters.shape)
 
-    if not _np.all(binned_basal[:,0] == binned_mixed[:,0]):
-        print('binned_basal[:, 0] not equal to binned_mixed[:,0]')
+    if not _np.all(binned_basal[:,0] == binned_gating[:,0]):
+        print('binned_basal[:, 0] not equal to binned_gating[:,0]')
         _pdb.set_trace()
 
     # save just a few samples of g and letters (at only -.1 and .1 secs) for displaying purposes
     binned_g[:,preSacP].tofile(datapath+'binned_g_preSac')
     binned_basal[:,preSacP].tofile(datapath+'binned_basal_preSac')
-    binned_mixed[:,preSacP].tofile(datapath+'binned_mixed_preSac')
+    binned_gating[:,preSacP].tofile(datapath+'binned_gating_preSac')
     binned_g[:,postSacP].tofile(datapath+'binned_g_postSac')
     binned_basal[:,postSacP].tofile(datapath+'binned_basal_postSac')
-    binned_mixed[:,postSacP].tofile(datapath+'binned_mixed_postSac')
+    binned_gating[:,postSacP].tofile(datapath+'binned_gating_postSac')
    
     # At this point, I want data to be tuples. I will convert them here (doing it only once rather than doing it every time I need them).
     # I'm actually converting the transverse because I want binned_g[i] to be all 'g' values at time point i
     binned_g        = tuple(map(tuple, binned_g.T))
     binned_basal    = tuple(map(tuple, binned_basal.T))
-    binned_mixed    = tuple(map(tuple, binned_mixed.T))
+    binned_gating    = tuple(map(tuple, binned_gating.T))
 
     """
     basal_total_info = get_total_info_since_t0(binned_g, binned_basal, -.2)
@@ -198,24 +176,24 @@ def data_summary():
     mixed_total_info.tofile(datapath+'mixed_total_info')
     """
 
-    # computing information under basal and mixed using different amount of letters
-    print('Compute total information with N letters under basal or where the letters are taken from binned_mixed')
+    # computing information under basal and gating using different amount of letters
+    print('Compute total information with N letters under basal or where the letters are taken from binned_gating')
     for N in [1, 2, 10]:
         basal_info   = get_info(binned_g, [binned_basal]*N)
-        basal_info.tofile(datapath+'mi_{0}b_0g_0i_{1}ms'.format(N, int(1000*letter_length)))
-        mixed_info   = get_info(binned_g, [binned_mixed]*N)
-        mixed_info.tofile(datapath+'mi_{0}m_{1}ms'.format(N, int(1000*letter_length)))
+        basal_info.tofile(datapath+'mi_{0}b_0g_{1}ms'.format(N, letter_length_in_ms))
+        gating_info   = get_info(binned_g, [binned_gating]*N)
+        gating_info.tofile(datapath+'mi_0b_{0}g_{1}ms'.format(N, letter_length_in_ms))
 
     # compare the amount of information gained by the last letter (out of N) in several different cases:
     #   i.      both letters are under basal state
-    #   ii.     letters are taken from mixed response
+    #   ii.     letters are taken from gating response
     for i in [2, 4, 8]:
-        print('Computing information last letter carries about g in a 2L word when all letters come form basal nl')
+        print('Computing information last letter carries about g in a {0}L word when all letters come form basal nl'.format(i))
         basal_cond_info = get_cond_info(binned_g, [binned_basal]*i)
-        basal_cond_info.tofile(datapath+'cond_mi_{0}b_0g_0i_{1}ms'.format(i, int(1000*letter_length)))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
-        print('Computing information last letter carries about g in a 2L word when letters come form binned_mixed')
-        mixed_cond_info = get_cond_info(binned_g, [binned_mixed]*i)
-        mixed_cond_info.tofile(datapath+'cond_mi_{0}m_{1}ms'.format(i, int(1000*letter_length)))
+        basal_cond_info.tofile(datapath+'cond_mi_{0}b_0g_{1}ms'.format(i, letter_length_in_ms))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
+        print('Computing information last letter carries about g in a {0}L word when letters come from gating'.format(i))
+        gating_cond_info = get_cond_info(binned_g, [binned_gating]*i)
+        gating_cond_info.tofile(datapath+'cond_mi_0b_{0}g_{1}ms'.format(i, letter_length_in_ms))
     
     """
     # compute the amount of information the given letters convey about g. By "given letters" I mean an iter
@@ -235,9 +213,9 @@ def data_summary():
     """
 
     # make all plots
-    plot_summary()
+    plot_summary(letter_length_in_ms)
 
-def plot_summary(letter_length):
+def plot_summary(letter_length_in_ms):
     global g#, bin_rate, gating_start_t, gating_end_t
     
     if g is None: 
@@ -265,8 +243,6 @@ def plot_summary(letter_length):
     
 
     # plot that DO depend on letter length
-    letter_length_in_ms = int(1000*letter_length)
-    
     plot_calcium_information(letter_length_in_ms)
 
     plot_letters_N(letter_length_in_ms)
@@ -278,7 +254,6 @@ def plot_summary(letter_length):
     plot_densities(letter_length_in_ms)
 
     plot_compare_letter_length([10, 25, 125])
-    #plot_letter_length(letter_length_in_ms)
 
 def load_UFlicker_PSTH(i):
     '''
@@ -422,6 +397,7 @@ def _loadImage(imNumber):
 
     return image
 
+
 def _getEyeSeq(filter_length):
     '''
     Generate a sequence of eye movements in both x and y directions
@@ -534,17 +510,17 @@ def plot_calcium_information(letter_length):
 
     datapath = path_template.replace('#', str(letter_length))
     tax = _get_ploting_TAX(letter_length/1000)
-    basal_info_1L = _np.fromfile(datapath+'mi_1b_0g_0i_{0}ms'.format(letter_length))
+    basal_info_1L = _np.fromfile(datapath+'mi_1b_0g_{0}ms'.format(letter_length))
     #basal_info_2L = _np.fromfile(datapath+'mi_2b_0g_{0}ms'.format(letter_length))
-    mixed_info_1L = _np.fromfile(datapath+'mi_1m_{0}ms'.format(letter_length))
-    #mixed_info_2L = _np.fromfile(datapath+'mi_2m_{0}ms'.format(letter_length))
+    gating_info_1L = _np.fromfile(datapath+'mi_0b_1g_{0}ms'.format(letter_length))
+    #gating_info_2L = _np.fromfile(datapath+'mi_0b_2g_{0}ms'.format(letter_length))
     
     #_pdb.set_trace()
     _plt.close('calcium_information')
     fig, ax = _plt.subplots(num='calcium_information')
 
-    ax.plot(tax, mixed_info_1L, 'b', lw=2, label="gating")
-    #ax.plot(tax, mixed_info_2L, ':b', lw=2, label="0b 2g")
+    ax.plot(tax, gating_info_1L, 'b', lw=2, label="gating")
+    #ax.plot(tax, gating_info_2L, ':b', lw=2, label="0b 2g")
     ax.plot(tax, basal_info_1L, 'r', lw=2, label="basal")
     #ax.plot(tax, basal_info_2L, ':r', lw=2, label="2b 0g")
 
@@ -834,27 +810,26 @@ def plot_compare_nls(letter_length):
 
     #_pdb.set_trace()
     # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
-    basal_2L = _np.fromfile(datapath+'cond_mi_2b_0g_0i_{0}ms'.format(letter_length))
-    #gating_2L = _np.fromfile(datapath+'cond_mi_0b_2g_{0}ms'.format(letter_length))
-    mixed_2L = _np.fromfile(datapath+'cond_mi_2m_{0}ms'.format(letter_length))
+    basal_2L = _np.fromfile(datapath+'cond_mi_2b_0g_{0}ms'.format(letter_length))
+    gating_2L = _np.fromfile(datapath+'cond_mi_0b_2g_{0}ms'.format(letter_length))
 
     """
     start_p = time_to_point(gating_start_t, 0)
     end_p = time_to_point(gating_end_t, 0)
 
-    mixed = basal_2L.copy()
-    mixed[start_p:end_p] = gating_2L[start_p:end_p]
+    gating = basal_2L.copy()
+    gating[start_p:end_p] = gating_2L[start_p:end_p]
 
     # get the tax if it doesn't exist
-    #ax.plot(tax[:start_p], mixed[:start_p], 'r', lw=2)
-    #ax.plot(tax[start_p-1:end_p+1], mixed[start_p-1:end_p+1], 'b', lw=2)
-    #ax.plot(tax[end_p:], mixed[end_p:], 'r', lw=2)
+    #ax.plot(tax[:start_p], gating[:start_p], 'r', lw=2)
+    #ax.plot(tax[start_p-1:end_p+1], gating[start_p-1:end_p+1], 'b', lw=2)
+    #ax.plot(tax[end_p:], gating[end_p:], 'r', lw=2)
     """
     tax = _get_ploting_TAX(letter_length/1000)
     ax.plot(tax, basal_2L+basal_2L.max()/100, ':r', lw=2, label = r'$basal$')
-    ax.plot(tax, mixed_2L, 'b', lw=2, label=r'$gating$')
+    ax.plot(tax, gating_2L, 'b', lw=2, label=r'$gating$')
 
-    #ax.plot(tax, mixed, 'b', lw=2, label=r'$gating$')
+    #ax.plot(tax, gating, 'b', lw=2, label=r'$gating$')
     #ax.plot(tax, cond_mi_4L, '-.r', lw=2, label='4L')
     #ax.plot(tax, cond_mi_8L, '--r', lw=2, label='8L')
 
@@ -918,30 +893,7 @@ def plot_letter_length():
     ax.spines['right'].set_visible(False)
     
     return fig
-    
-    """
-    ax.set_xlim(-.2, .8)
-    ax.set_ylim(0, 1.2)
-    ax.set_xticks((0, .5))
-    ax.set_xticklabels((0, .5), size=10)
-    ax.set_yticks((0, 1))
-    ax.set_yticklabels((0, 1), size=10)
 
-    ax.xaxis.set_ticks_position('bottom')
-    ax.yaxis.set_ticks_position('left')
-
-    ax.legend(fontsize=10, handlelength=1, handletextpad=.25, frameon=False, bbox_to_anchor=(1,1.1))#, frameon=False)
-    #ax.legend(loc=9, fontsize=10, ncol=3, handlelength=1, handletextpad=.25, columnspacing=1, frameon=False, bbox_to_anchor=(.5,1.10))#, frameon=False)
-    ax.set_xlabel('Time (s)', fontsize=10)
-    ax.set_ylabel('Normalized\nInformation', fontsize=10)
-    fig.subplots_adjust(bottom=.30, left=.25, right=1, top=1)
-    ax.set_title('I( g(t)+n; g(t) | all other letters and lettersN={0})\ncomparing different letters length'.format(lettersN))
-    
-    fig.set_size_inches(2.5, 1.5)
-    fig.savefig('Figures/letter_lengthRedundancy.pdf', transparent=True)
-
-    return fig, ax
-    """
 
 def plot_gating_effect(letter_length):
     from os import listdir
@@ -967,64 +919,6 @@ def plot_gating_effect(letter_length):
 
     return fig
 
-def plot_word_info(lettersN_list=None, length_list=None):
-    '''
-    get_word_info saves files of the form datapath+'gating_word_info_#L_ms', plot those that match lettersN_list, length_list
-    '''
-
-    from os import listdir
-    from matplotlib.path import Path
-    import matplotlib.patches as patches
-
-    nongating_list = [name for name in listdir(datapath+'') if name.startswith('nongating_word_info_')]
-    gating_list = [name for name in listdir(datapath+'') if name.startswith('gating_word_info_')]
-
-    _plt.close('word_info')
-    fig, ax = _plt.subplots(num='word_info')
-
-
-    for name in gating_list:
-        tokens = name.split("_")
-        lettersN = int(tokens[3][:-1])
-        length = int(tokens[4][:-2])
-        if (lettersN_list is None or lettersN in lettersN_list) and (length_list is None or length in length_list):
-            ax.plot(_get_ploting_TAX(letter_length/1000), _np.fromfile(datapath+''+name), 'b', label = r'$gating$', lw=2)
-            ax.plot(_get_ploting_TAX(letter_length/1000), _np.fromfile(datapath+'non'+name), 'r', label = r'$basal$', lw=2)
-
-    # add dotted line at 0
-    ax.plot([0,0], ax.get_ylim(), ':k', label = '_nolabel_')
-
-    # add a gray rectangle showing gating TW
-    verts = [(gating_start_t,0), (gating_start_t,ax.get_ylim()[1]), (gating_end_t, ax.get_ylim()[1]), (gating_end_t, 0), (gating_start_t,0),]
-    code = [Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY,]
-    path = Path(verts, code)
-    patch = patches.PathPatch(path, edgecolor='.75', facecolor='.75', lw=1, alpha=1)
-    ax.add_patch(patch)
-    ax.set_xlim(-.2, .8)
-    ax.set_ylim(-.1, ax.get_ylim()[1])
-
-    #ax.legend(fontsize=10, frameon=False)
-    ax.set_xticks((-.2, 0, .2, .6))
-    ax.set_xticklabels((-.2, 0, .2, 6), fontsize=10)
-
-    ax.set_yticks((0, .5, 1, 1.5))
-    ax.set_yticklabels((0, .5, 1, 1.50), fontsize=10)
-
-    ax.text(0.3, ax.get_ylim()[1]*.60, r'$gating$', color='b')
-    ax.text(0.3, ax.get_ylim()[1]*.35, r'$no gating$', color='r')
-
-    ax.set_xlabel(r'$Time\, (s)$', fontsize=10)
-    ax.set_ylabel(r'$Infomration\, (Bits)$', fontsize=10)
-    ax.yaxis.set_label_coords(-.25, .4)
-    
-    # add margin for axis labels
-    fig.subplots_adjust(bottom=.35, left=.25, right=1, top=1)
-
-    fig.set_size_inches(2, 1.5)
-    fig.savefig('Figures/word_info.pdf', transparent=True)
-
-    return fig
-
 def plot_densities(letter_length):
     '''
     Plot histograms after binning the data (g, basal and gating)
@@ -1038,17 +932,17 @@ def plot_densities(letter_length):
     g_post      = _np.fromfile(datapath+'g_postSac_nobinning')
     basal_pre   = _np.fromfile(datapath+'basal_letters_preSac_nobinning')
     basal_post  = _np.fromfile(datapath+'basal_letters_postSac_nobinning')
-    mixed_pre   = _np.fromfile(datapath+'mixed_letters_preSac_nobinning')
-    mixed_post  = _np.fromfile(datapath+'mixed_letters_postSac_nobinning')
+    gating_pre   = _np.fromfile(datapath+'gating_letters_preSac_nobinning')
+    gating_post  = _np.fromfile(datapath+'gating_letters_postSac_nobinning')
 
     _plt.close('densities')
     fig, ax = _plt.subplots(nrows=3, num='densities')
 
     _, bins, _= ax[0].hist(g_post, bins=200, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=120ms$')
     ax[0].hist(g_pre, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=-100ms$')
-    _, bins, _ = ax[1].hist(mixed_pre, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=-100ms$')
+    _, bins, _ = ax[1].hist(gating_pre, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=-100ms$')
     ax[1].hist(basal_pre, bins=bins, normed=True, histtype='step', lw=2, alpha=1, label=r'$basal, t=-100ms$')
-    _, bins, _ = ax[2].hist(mixed_post, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=120ms$')
+    _, bins, _ = ax[2].hist(gating_post, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=120ms$')
     ax[2].hist(basal_post, bins=bins, normed=True, histtype='step', alpha=1, lw=2, label=r'$basal, t=-100ms$')
 
     #ax[0].text(500, .008, 'LP')
@@ -1078,10 +972,10 @@ def plot_binned_density(letter_length):
     # load binned data, I only have two slices of time for each (at -.1 and .1 secs relative to saccade)
     binned_g_pre        = _np.fromfile(datapath + 'binned_g_preSac', dtype=int)
     binned_basal_pre    = _np.fromfile(datapath + 'binned_basal_preSac', dtype=int)
-    binned_mixed_pre    = _np.fromfile(datapath + 'binned_mixed_preSac', dtype=int)
+    binned_gating_pre    = _np.fromfile(datapath + 'binned_gating_preSac', dtype=int)
     binned_g_post       = _np.fromfile(datapath + 'binned_g_postSac', dtype=int)
     binned_basal_post   = _np.fromfile(datapath + 'binned_basal_postSac', dtype=int)
-    binned_mixed_post   = _np.fromfile(datapath + 'binned_mixed_postSac', dtype=int)
+    binned_gating_post   = _np.fromfile(datapath + 'binned_gating_postSac', dtype=int)
 
     _plt.close('binned_density')
     fig, ax = _plt.subplots(nrows=3, num='binned_density')
@@ -1089,11 +983,11 @@ def plot_binned_density(letter_length):
     _, bins, _ = ax[0].hist(binned_g_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=120ms$')
     ax[0].hist(binned_g_pre, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=-100ms$')
 
-    _, bins, _ = ax[1].hist(binned_mixed_pre, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$gating, t=-100ms$')
-    ax[1].hist(binned_basal_pre, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=-100ms$')
+    _, bins, _ = ax[1].hist([binned_gating_pre, binned_basal_pre], bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=[r'$gating, t=-100ms$', r'$basal$'])
+    #ax[1].hist(binned_basal_pre, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=-100ms$')
 
-    _, bins, _ = ax[2].hist(binned_mixed_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$gating, t=120ms$')
-    ax[2].hist(binned_basal_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=120ms$')
+    _, bins, _ = ax[2].hist([binned_gating_post, binned_basal_post], bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=[r'$gating, t=120ms$', r'$basal$'])
+    #ax[2].hist(binned_basal_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=120ms$')
 
     ax[0].set_xlim(1,16)
     ax[1].set_xlim(1,16)
@@ -1127,10 +1021,10 @@ def plot_letters_N(letter_length):
     tax = _get_ploting_TAX(letter_length/1000)
 
     # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
-    mi_1L = _np.fromfile(datapath+'mi_1b_0g_0i_{0}ms'.format(letter_length))
-    cond_mi_2L = _np.fromfile(datapath+'cond_mi_2b_0g_0i_{0}ms'.format(letter_length))
-    cond_mi_4L = _np.fromfile(datapath+'cond_mi_4b_0g_0i_{0}ms'.format(letter_length))
-    cond_mi_8L = _np.fromfile(datapath+'cond_mi_8b_0g_0i_{0}ms'.format(letter_length))
+    mi_1L = _np.fromfile(datapath+'mi_1b_0g_{0}ms'.format(letter_length))
+    cond_mi_2L = _np.fromfile(datapath+'cond_mi_2b_0g_{0}ms'.format(letter_length))
+    cond_mi_4L = _np.fromfile(datapath+'cond_mi_4b_0g_{0}ms'.format(letter_length))
+    cond_mi_8L = _np.fromfile(datapath+'cond_mi_8b_0g_{0}ms'.format(letter_length))
 
     # get the tax if it doesn't exist
     tax = _get_ploting_TAX(letter_length/1000)
@@ -1190,37 +1084,41 @@ def plot_compare_letter_length(letter_length_list):
     for the given letters, compare some type of curve, either the conditional information with 2L or the total information
     '''
 
-    _plt.close('compare_letter_length')
-    fig, ax = _plt.subplots(num = 'compare_letter_length')
+    try:
+        _plt.close('compare_letter_length')
+        fig, ax = _plt.subplots(num = 'compare_letter_length')
 
-    for letter_length in letter_length_list:
-        datapath = path_template.replace('#', str(letter_length))
+        for letter_length in letter_length_list:
+            datapath = path_template.replace('#', str(letter_length))
 
-        tax = _get_ploting_TAX(letter_length/1000)
-        trace = _np.fromfile(datapath + 'cond_mi_2m_{0}ms'.format(letter_length))
-        ax.plot(tax, trace, lw=2, label = '{0}ms'.format(letter_length))
+            tax = _get_ploting_TAX(letter_length/1000)
+            trace = _np.fromfile(datapath + 'cond_mi_0b_2g_{0}ms'.format(letter_length))
+            ax.plot(tax, trace, lw=2, label = '{0}ms'.format(letter_length))
 
-    ax.legend(loc=1, fontsize=10, handlelength=1.5, bbox_to_anchor = (1.2, 1.2))
+        ax.legend(loc=1, fontsize=10, handlelength=1.5, bbox_to_anchor = (1.2, 1.2))
 
-    xticks = _np.arange(-.2, .8, .4)
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xticks, fontsize=10)
-    ax.set_xlim(-.2, .8)
+        xticks = _np.arange(-.2, .8, .4)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xticks, fontsize=10)
+        ax.set_xlim(-.2, .8)
 
-    yticks = range(0, int(ax.get_ylim()[1]+1), 1)
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(yticks, fontsize=10)
-    ax.set_ylabel(r'$Information (Bits)$', fontsize=12)
-    
-    ax.set_xlabel(r'$Time\, (s)$')
+        yticks = range(0, int(ax.get_ylim()[1]+1), 1)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(yticks, fontsize=10)
+        ax.set_ylabel(r'$Information (Bits)$', fontsize=12)
+        
+        ax.set_xlabel(r'$Time\, (s)$')
 
-    ax.tick_params(length=3, right='off', top='off')
+        ax.tick_params(length=3, right='off', top='off')
 
-    fig.set_size_inches(2.5, 2.5)
-    fig.subplots_adjust(left=.3, bottom=.3, right=.9, top=.9)
+        fig.set_size_inches(2.5, 2.5)
+        fig.subplots_adjust(left=.3, bottom=.3, right=.9, top=.9)
 
 
-    fig.savefig('Figures/compare_letter_length')
+        fig.savefig('Figures/compare_letter_length')
+    except:
+        print("plot_compare_letter_length failed, most likely because it couldn't load one of the cond_mi arrays")
+        _plt.close('compare_letter_length')
 
 """
 def clean_plot(fig, output_name="", axis=True, ticks=True, ticklabels=True, axeslabels=True, figtitle=True, axtitle=True, spines):
@@ -1507,24 +1405,6 @@ def point_to_s(point):
     '''
     return _get_simulation_TAX()[point]
 
-def chain_rule_info(covG, covN, letter_length, lettersN):
-    '''
-    wrapper to call _chain_rule_info(covG, covN, p0, points) on every p0
-    '''
-    #_pdb.set_trace()
-    
-    # preallocate output
-    tax = _get_simulation_TAX()
-    chain = _np.zeros((len(tax), lettersN))
-
-    points_per_letter = int(letter_length/sim_delta_t)
-    
-    for p in range(points_per_letter*(lettersN-1), len(tax)):
-        points = [-i*points_per_letter+p for i in range(lettersN-1, -1, -1)]
-        chain[p,:] = _chain_rule_info(covG, covN, p, points).T
-    
-    return chain
-
 def _chain_rule_info(covG, covN, p0, points):
     '''
     Decompose the information according to the chain rule and return all the terms in the chain rule.
@@ -1680,94 +1560,6 @@ def get_total_info_since_t0(binned_g, letters, t0):
 
     return total_info
 
-
-def get_info(binned_g, letters_list):
-    '''
-    Compute I(g(t) ; letters_list[:](t and previous times))
-
-    the formula reads... Compute the mutual information between g at time t and all letters (spaced by letter_length) ending on time t.
-
-    
-    input:
-    ------
-        g:                  tuple of tuples, now g[i] means all g values at time point i and g[i][j] is linear prediction for cell j, time point i
-
-        letters_list:       Each element of the list should be a tuple of tuple as 'g', holding the output of passing g through a given nonlinear object followed by binning
-
-    output:
-        info:               at each point in time, I(x, y)
-    
-    Implementation notes:
-        for each point along the time axis, extract the last value of g (x), the set of N letters ending on time t (y). Then feed all that into _info.mi(x, y)
-
-    '''
-    #_pdb.set_trace()
-
-    lettersN = len(letters_list)
-
-    info = _np.zeros(len(binned_g))
-
-    # I can only compute the info if time is such that I can extract (lettersN-1) prior to current time. That means that for the first (lettersN-1) points I can't compute the information.
-    for p in range(lettersN-1, len(binned_g)):
-        x = binned_g[p]
-
-        y = ()
-        for i in range(lettersN):
-            # When there is only 1 letter in letters_list, N-i-1 = 0 and 'y' is taken at point 'p' as is 'x'. With two letters, first one is taken at 'p-letters_delta_p' and second one is taken at 'p'
-            y += (letters_list[i][p-(lettersN-i-1)],)
-        
-        newY = _info.combine_labels(*y)
-        info[p] = _info.mi(x, newY)
-
-    return info
-
-def get_cond_info(binned_g, letters_list):
-    '''
-    Compute I(g(t) ; letters_list[-1](t) | letters_list[:-1](at previous times))
-
-    the formula reads... Compute the mutual information between g at time t and the last letter at time t, given the previous letters measured.
-
-    
-    input:
-    ------
-        g:                  (2d ndarray) g[i,j] is the linear prediction for cell i at time point j
-
-        letters_list:       Each element of the list should be a 2d ndarray the same shape as g and holds the output of passing g through a given nonlinear object followed by binning
-
-    output:
-        cond_info:          at each point in time, I(x, y | z)
-    
-    Implementation notes:
-        for each point along the time axis, extract the last value of g (x), the last letter (y) and the previous letters (z). Then feed all that into _info.cond_mi(x, y, z)
-
-    '''
-    #_pdb.set_trace()
-
-    lettersN = len(letters_list)
-
-    cond_info = _np.zeros(len(binned_g))
-
-    #if lettersN > 2:
-    #    raise ValueError("naturalscenes.get_cond_info:\n I'm assuming in the implementation that there are exactly 2 letters.\n Expand implementation as needed")
-
-    # I can only compute the cond_info if last letter is such that the 1st letter is in the simulation. That means that I can't compute the cond_info for the first lettersN-1 points
-
-    for p in range(lettersN-1, len(binned_g)):
-        x = binned_g[p]
-
-        y = letters_list[-1][p]
-
-        z = ()
-        for i in range(lettersN-1):
-            # when lettersN is 2,   i=0 and letters are taken from letters_list[0][p-letters_delta_p]
-            # when lettersN is 3,   i=0-> letters_list[0][p-2*letters_delta_p]
-            #                       i=1-> letters_list[1][p-1*letters_delta_p]
-            z += (letters_list[i][p-(lettersN-i-1)],)
-        
-        newZ = _info.combine_labels(*z)
-        cond_info[p] = _info.cond_mi(x, y, newZ)
-
-    return cond_info
 
 def get_word_cond_info(g,nls):
     ''' 
@@ -1945,86 +1737,6 @@ def info_decay(t0, t1, g, covG, sigmoids, binsN=8):
     _plt.title('binsN={0}'.format(binsN))
     _plt.savefig('Figures/Decay, binsN={0}.pdf'.format(binsN), transparent=True)
     return decay
-
-def info_gained_by_last_letter(covG, covN, letter_length, lettersN):
-    '''
-    Return the informatin that the last letter (out of lettersN) conveys about g given all previous letters
-
-    The information I'm computing is:
-        I(g(p0) ; g(p0)+n | g(p1)+n, ..., g(pn)      where p1, p2, ..., pn are points distanced by t0 seconds
-
-    Implemenation notes:
-        I(X; Y | Z) = H(X | Z) - H(X | Y, Z)
-                    = H(X, Z) - H(Z) - ( H(X, Y, Z) - H(Y, Z) )
-                    = H(X, Z) + H(Y, Z) - H(X, Y, Z) - H(Z)
-     computes:
-        I(g(t), g(t)+noise)
-        I(g(t), g(t)+noise | g(t-t0)+noise)                                   
-        I(g(t), g(t)+noise | g(t-t0)+noise,g(t-2*t0)+noise)                   
-        I(g(t), g(t)+noise | g(t-t0)_noise,g(t-2*t0)+noise,g(t-3*t0)+noise)   
-    
-    intpus:
-    -------
-        covG (2d ndarray)
-
-        letter_length (float):  in seconds
-
-        lettersN (int):         computes the information between g(t0) and a word of length lettersN taken from g(t)+noise
-
-        save (string):          if given will save the output information to the given file
-                                if not given, saves chain information to a default name: 'chainInfo_{0}L_{1}ms'.format(lettersN, int(t0*1000)),
-    
-    output:
-    -------
-        cond_info:              data is also stored in file datapath+'cond_info_{0}L_{1}ms'
-    '''
-    #_pdb.set_trace()
-    # pre allocate ndarrays for output
-    tax = _get_simulation_TAX()
-    cond_info = _np.zeros_like(tax)
-
-    for i, t in enumerate(tax):
-        if lettersN == 1:
-            # in this case there is no cond_info
-            X = _extractSubCov(covG, covN, [], [i])
-            Y = _extractSubCov(covG, covN, [i], [])
-            XY = _extractSubCov(covG, covN, [i], [i])
-
-            entropy_X   = _info.gaussianEntropy(X)
-            entropy_Y   = _info.gaussianEntropy(Y)
-            entropy_XY  = _info.gaussianEntropy(XY)
-
-            cond_info[i] = entropy_X + entropy_Y - entropy_XY
-        else:
-
-            # Define the points (and their time counter parts) that make the word
-            times = [t - i*letter_length for i in range(lettersN-1, -1, -1)]
-            if times[0] < tax[0]:
-                cond_info[i] = _np.nan
-            else:
-                points = [time_to_point(t, 0) for t in times]
-
-                # in order to compute information, I need to extract the covariance matrix between g(t) and g+n(t), g+n(t-1), etc.
-                # then mi_1 is a conditional information and mi_2 is not
-                # According to the implementaion note, I will need to compute 4 different entropies in the conditional information. Extract the subCov corresponding for each one of them
-                # X is the noisy letter at t
-                # Y is the true value of the linear prediction at t
-                # Z are the noisy letters at previous times than t
-                XZ = _extractSubCov(covG, covN, [], points)
-                YZ = _extractSubCov(covG, covN, [points[-1]], points[:-1])
-                XYZ = _extractSubCov(covG, covN, [points[-1]], points)
-                Z = _extractSubCov(covG, covN, [], points[:-1])
-
-                entropy_XZ  = _info.gaussianEntropy(XZ)
-                entropy_YZ  = _info.gaussianEntropy(YZ)
-                entropy_XYZ = _info.gaussianEntropy(XYZ)
-                entropy_Z   = _info.gaussianEntropy(Z)
-
-                cond_info[i] = entropy_XZ + entropy_YZ - entropy_XYZ - entropy_Z
-            
-    cond_info.tofile(datapath+'cond_info_{0}L_{1}ms'.format(lettersN, letter_length), sep="\r", format="%5f")
-
-    return cond_info
 
 
 def fit_exp_to_simulation(g, df, nogating_t, gating_t, cell=None):
@@ -2228,119 +1940,6 @@ def fake_noise(s_type, contrast, samples=1E5, mean=127):
     return stim
    
 
-"""
-def _fit_contrast_to_simulation(g, time):
-    '''
-    Find the gaussian contrast that best approximates the distribution of linear predictions (g) at 'time'
-
-    *********************************
-        This is not working as expected because the only thing this is doing is trying to remove the huge pick at 0 in the gaussian distribution by increasing the contrast
-    *********************************
-
-    outputs:
-    --------
-        return the contrast Gaussian fit
-    '''
-
-    point = time_to_point(time, 0)
-    hist, bins = _np.histogram(g[:,point], bins=200)
-    errors = []
-    
-    for C in _np.arange(7,10,.5):
-        gaussian = filter_gaussian_noise(filter_instance, C)
-        hist_g, _ = _np.histogram(gaussian, bins=bins)
-
-        hist_g -= hist
-        errors.append((C,_np.dot(hist_g, hist_g))
-
-    return errors
-
-def _threshold_to_rate(g, threshold, slope=1):
-    '''
-    convert linear prediction to rate using just rectification. the nonlinearity is described by a threshold. For a value of g rate is 0 if g < threshold and (g-threshold)*slope otherwise
-
-    intpus:
-        g (ndarray):        can have any number of dimensions.
-
-        threshold (float):  
-
-        slope (float):
-
-    output:
-        rate (ndarray):     same dimension as g
-
-    '''
-    thresholded_g = (g - threshold)*slope
-    below_thresh_indices = thresholded_g< 0
-    thresholded_g[below_thresh_indices] = 0
-    
-    return thresholded_g
-
-def _threshold_to_rate2(g, threshold, slope=1):
-    return _np.where(g>threshold, (g-threshold)*slope, _np.zeros_like(g))
-"""
-
-def _get_information_ratio(sub_g, nogating_threshold, gating_threshold, binned_g, binsN, lettersN=2):
-    '''
-    Get the ratio between two informations, gating over no-gating
-    Independently of gating or no-gating, each word has the same number of letters (2 by default).
-    Timing of both words is the same and is such that all letters but the last one are before gating and the last one is after gating
-    1st word is such that all letters are computed using non gating nonlinearity (denominator)
-    2nd word is computed with just the last letter under the gating nonlinearity. Gating rates are computed by shifting the threshold from the non gating nonlinearity by 10x the STD of the linear prediction at 3% contrast (that comes from my model done in igor)
-    
-    inputs:
-    -------
-        sub_g:  already selected for the two times of interest, it's shape has to be (:,2), oterwise raise error
-
-    by looping over this function with many different thresholds, I can get how efficient gating is. Pass the output of this into a conditional infomration function
-    '''
-
-    #_pdb.set_trace()
-    # convert g to firing rate in the case of no gating
-    nogating_words = _threshold_to_rate(sub_g, nogating_threshold)
-
-    # convert g to firing rate in the case of gating
-    gating_words = nogating_words.copy()
-    gating_words[:,1] = _threshold_to_rate(sub_g[:,1], gating_threshold)
-
-    # bin both type of words using the same max/min
-    v_max = max(gating_words.max(), nogating_words.max())
-    v_min = min(gating_words.min(), nogating_words.min())
-
-    nogating_words_binned = _info.binned(nogating_words, binsN, maxX=v_max, minX=v_min)
-    gating_words_binned = _info.binned(gating_words, binsN, maxX=v_max, minX=v_min)
-
-    return _info.cond_mi(binned_g, gating_words_binned[:, -1], gating_words_binned[:, 0])/_info.cond_mi(binned_g, nogating_words_binned[:, -1], nogating_words_binned[:,0])
-
-    
-    cond_info = []
-    for lettersN in letter_number_list:
-        pass
-
-    return cond_info
-
-def get_information_ratio(g, last_letter_t, letter_length, binsN, lettersN=2):
-    '''
-    wrapper to call _get_information_ratio
-    '''
-    #_pdb.set_trace()
-
-    # convert times of letters to points
-    points = [time_to_point(last_letter_t - n*letter_length, 0) for n in range(lettersN-1, -1, -1)]
-
-    # extract teh values of g at those points of interest
-    sub_g = g[:, points]
-
-    # bin the linear prediction at last_letter_t
-    binned_g = _info.binned(sub_g[:, -1], binsN)
-
-    # calculate how much is the nonlinearity shifting during gating
-    shift = _get_shift()
-    no_gating_thresh = 50
-    gating_thresh = no_gating_thresh - shift
-
-    return _get_information_ratio(sub_g, no_gating_thresh, gating_thresh, binned_g, binsN, lettersN = lettersN)
-    
 def rate_increase(g, slope_range, thresh_range, binsN):
     '''
     compute the ratio of gating to nongating information for a bunch of conditions
@@ -2614,56 +2213,6 @@ def explore_word_letters(g, start_t, end_t, bipolar, bin_rate):
     _plt.figure('letter_distribution')
     _plt.hist([gating_letters.flatten(), nongating_letters.flatten()],bins=10, cumulative=True)
 
-def get_word_info(g, gating_start_t, gating_end_t, letter_length, lettersN, nl, binsN):
-    '''
-    Comput the information at all time points of the words in both gating/nogating cases.
-    Gating starts and ends at gating_start_t and gating_end_t, if words dont overlap this window then gating/nogating is teh same.
-    During gating nl.gating_nl will be used and created if it doesn't exist.
-    '''
-    #_pdb.set_trace()
-    gating_start_p = time_to_point(gating_start_t, 0)
-    gating_end_p = time_to_point(gating_end_t, 0)
-    p0 = gating_start_p
-    p1 = gating_end_p
-
-    # pass g through the non gating nl
-    #nongating_letters = nl.torate(g, units=1)
-    bin_rate = g.max()/binsN
-    nongating_letters = nl.torate(g, units=1, bin_rate=bin_rate)
-    
-    # letters outside the gating window are identical for gating/nongating so when computing gating letters start by copying all nongating ones and then replase letters inside the gating window
-    gating_letters = nongating_letters.copy() 
-    gating_letters[:, gating_start_p:gating_end_p] = nl.gating_rate(g[:, gating_start_p:gating_end_p], units=1, bin_rate=bin_rate)
-
-    # bin g using percentiles
-    bins = list(_np.arange(0, 101, 100/binsN))
-    percentiles = _np.percentile(g, bins)
-    binned_g = _np.digitize(g.flatten(), percentiles).reshape(g.shape)
-
-    #_plt.figure(num='word_histogram')
-    #_plt.hist([binned_g[:,p0:p1], gating_letters[:,p0:p1], nongating_letters[:,p0:p1]], bins=list(range(-5,5)))
-
-    # compute mi between non gating letters and g and between gating letters and g
-    nongating_mi = _np.zeros(g.shape[1])
-    gating_mi = _np.zeros(g.shape[1])
-    for i in range(lettersN-1, len(nongating_mi)):
-    #for i in range(100,150):
-        #_pdb.set_trace()
-        nongating_mi[i] = _info.mi(binned_g[:,i], _info.multi_D_sybmols_to_1D(nongating_letters[:,i-lettersN+1:i+1]))
-
-        # if computing information for a word straddling the information window, computing informaiton from gating_letters, if not just copy the nongating_mi
-        if i>=gating_start_p and gating_end_p + lettersN > i:
-            gating_mi[i] = _info.mi(binned_g[:,i], _info.multi_D_sybmols_to_1D(gating_letters[:,i-lettersN+1:i+1]))
-        else:
-            gating_mi[i] = nongating_mi[i]
-
-    nongating_mi.tofile(datapath+'nongating_word_info_{0}L_{1}ms'.format(lettersN, letter_length))
-    gating_mi.tofile(datapath+'gating_word_info_{0}L_{1}ms'.format(lettersN, letter_length))
-    
-    
-def _simulate_bipolar(filter_instance):
-    pass
-
 def fit_all_TNF_cells():
     '''
     load all PSTHs for TNF experiment and fit the best peripheral_weight and nl_threshol that replicates the data.
@@ -2806,6 +2355,9 @@ class nonlinear_block:
         self.max_fr = max_fr
         self.sd  = sd
         self.slope = slope
+
+    def copy(self):
+        return nonlinear_block(self.s_type, self.thresh, self.units, contrast=self.contrast, min_fr=self.min_fr, max_fr=self.max_fr, sd=self.sd, slope=self.slope)
 
     def torate(self, linear_prediction, bin_rate=None):
         '''
@@ -3302,13 +2854,19 @@ class cell:
         I'm also gnerating the pink noise such that it has an auto correlation of roughly corr_time (assuming as in the simulation a step given by 'sim_delta_t')
         '''
         #_pdb.set_trace()
-        if corr_time == sim_delta_t:
-            noise = _np.random.randn(*shape)                        # here 'np' is numpy, not a typo
-        else:
-            noise = _pn.pink(shape, depth=corr_time/sim_delta_t)    # here 'pn' is pinknoise, not a typo
+        try:
+            noise = _np.fromfile('linear_prediction_noise').reshape(shape)
+            print('Noise loaded from "linear_prediction_noise" file')
+        except:
+            if corr_time == sim_delta_t:
+                noise = _np.random.randn(*shape)                        # here 'np' is numpy, not a typo
+            else:
+                noise = _pn.pink(shape, depth=corr_time/sim_delta_t)    # here 'pn' is pinknoise, not a typo
 
-        noise -= noise.mean()
-        noise *= std/noise.std()
+            _pdb.set_trace()
+            noise -= noise.mean()
+            noise *= std/noise.std()
+            noise.tofile('linear_prediction_noise')
 
         return noise
 
@@ -3365,6 +2923,39 @@ class cell:
         gating_mp = gating_mp.reshape(central_mp.shape)
 
         return central_mp + gating_mp
+
+
+    def get_gating_letters(self, lp):
+        '''
+        Pass linear prediction 'lp', through the corresponding nonlinearity to get gating latters. Corresponding nl is a combination of nl_basal plus a shift, where the shift is given by peripheral.kernel
+
+        At this point, lp time is in sim_delta_t and NOT in letter_length
+        '''
+        #_pdb.set_trace()
+
+        # grab peripheral contribution
+        kernel = self.periphery.kernel*nl_gating_threshold
+        
+        # preallocate gating letters
+        gating_letters = _np.zeros_like(lp)
+
+        # loop through the time axis of lp (axis=1), compute the nl according to the threshold and pass lp through it
+        for p in range(lp.shape[1]):
+            # convert p from lp to a shift.
+            # first convert p to time in lp and constrain it to be in the kernel range, then convert it to a shift
+            t = p*sim_delta_t + sim_start_t
+            if t < 0 or t >.45:         # not important to distinguish between less than 0 or more than .45 since both have the same shift (0)
+                t = 0
+
+            kernel_pnt = t/sim_delta_t
+            shift = kernel[kernel_pnt]
+
+            nl = self.nl_basal.copy()
+            nl.thresh += shift
+            print(nl.thresh)
+            gating_letters[:,p] = nl.torate(lp[:,p])
+
+        return gating_letters
 
     def get_ca_concentration(self):
         self.nl.torate
