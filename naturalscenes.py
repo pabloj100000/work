@@ -15,7 +15,7 @@ import pandas as _pd
 from time import time as _time
 import pickle as _pickle
 import pink_noise as _pn
-from os import makedirs
+from os import makedirs, remove
 
 # define simulation parameters
 pixperdegree = 46       # converts degrees to pixels in image
@@ -26,14 +26,13 @@ sim_start_t = -.5            # in seconds
 sim_end_t = 1                # in seconds
 bipolar_cell_file = 'bipolar_cell_5.txt'    # file exported from Igor
                                             # work with cell 5, file 4 is quite a bit more noisy and letters become more uncorrelated
-noise_corr_time = .05
+noise_corr_time = .005
 
 g = None
 images_list = None
 tax = None
 
 # define parameters for analyzing words
-letter_length = .025
 path_template='Data/#ms letter_length/'     #it will be initialized to Data/50ms letter_length or similar
 binsN = 16
 bin_rate = None
@@ -51,9 +50,9 @@ surround_weight = .9
 # define peripheral pathway parameters, if you change the parameters defining peripheral response, run "generate_peripheral_kernel()"
 periphery_size = 0      # "0" mean no spatial integration for this pathway
 periphery_kernel_file = '/Users/jadz/Documents/Notebook/Experiments/Simulations/Natural Images DB/New Saccade analysis/peripheral_kernel.txt'
-periphery_weight = 1    # overall weight factor for periphery, doesn't affect shape
+periphery_weight = 65   # controls the overall amplitud of peripheral kernel
 periphery_exc = 1       # this controlls the relative height of the gating excitatory shift
-periphery_inh = -1      # this controlls the relative height of the gating inhibitory window
+periphery_inh = 1       # this controlls the relative height of the gating inhibitory window
 gating_start_t = .05    # this controlls where gating starts
 gating_end_t = .15      # this controlls where gating ends/inhibition starts
 inhibition_end_t = .35  # this controlls where inhibition ends and basal starts
@@ -62,17 +61,17 @@ recovery_end_t = 0.4   # this controlls when the system returns to basal state
 
 # define parameters for internal threshold
 nl_type = 'birect'
-nl_basal_threshold = 0
-nl_gating_threshold = -65
-nl_inh_threshold = 65
+nl_basal_threshold = 55
+nl_gating_amplitud = 65
 nl_units = 'linear prediction'
 
 # define parameters for adaptation block
 adaptation_type = 'memory_normalization'
 adaptation_memory = 2           # in seconds
+adaptation_offset = 1
 
 
-def data_summary():
+def data_summary(letter_length_in_ms):
     '''
     Do everything needed to generate the figures that will go into the paper. Modify as needed
     
@@ -80,9 +79,10 @@ def data_summary():
     global g, bin_rate, datapath
     
     #_pdb.set_trace()
-    letter_length_in_ms = int(1000*letter_length)
+    letter_length = letter_length_in_ms/1000
     datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
     makedirs(datapath, exist_ok=True)
+    sacc_path = 'Sacc={0}, RWS=.0{1}/'.format(saccade_size, int(rw_step*100))
 
     # generate a bipolar cell object.
     # It has three pathways, center, surround and periphery, each one can contribute to the membrane potential (mp).
@@ -90,7 +90,7 @@ def data_summary():
     # Pass that noisy mp through a nonlinearity representing [Ca] concentration
     # Pass [Ca] through an adaptive block to represent vesicle release
 
-    bipolar = cell()
+    bipolar = cell(letter_length_in_ms)
 
     print('Loading or computing g')
     g = bipolar.processAllImages()              # this will take several hours unless it is loading from a file
@@ -117,22 +117,29 @@ def data_summary():
     # Downsample simulation to have time step equivalent to letter_length. It should average g/basal/mixed over a letter.
     """
     noisy_g         = decimate(noisy_g, int(letter_length/sim_delta_t), axis=1)
-    basal_letters   = decimate(basal_letters, int(letter_length/sim_delta_t), axis = 1)
+    basal_letters   = d/ecimate(basal_letters, int(letter_length/sim_delta_t), axis = 1)
     mixed_letters   = decimate(mixed_letters, int(letter_length/sim_delta_t), axis = 1)
     """
-    noisy_g         = average(noisy_g, int(letter_length/sim_delta_t))
-    basal_letters   = average(basal_letters, int(letter_length/sim_delta_t))
-    gating_letters   = average(gating_letters, int(letter_length/sim_delta_t))
+    #return noisy_g, basal_letters
+    noisy_g          = average(noisy_g, int(letter_length/sim_delta_t), 0)
+    basal_letters    = average(basal_letters, int(letter_length/sim_delta_t), 0)
+    gating_letters   = average(gating_letters, int(letter_length/sim_delta_t), 0)
     preSacP = int((-.1-sim_start_t)/letter_length)
     postSacP = int((.1-sim_start_t)/letter_length)
     
+
     #_pdb.set_trace()
-    noisy_g[:, preSacP].tofile(datapath+'g_preSac_nobinning')
-    basal_letters[:, preSacP].tofile(datapath+'basal_letters_preSac_nobinning')
-    gating_letters[:, preSacP].tofile(datapath+'gating_letters_preSac_nobinning')
-    noisy_g[:, postSacP].tofile(datapath+'g_postSac_nobinning')
-    basal_letters[:, postSacP].tofile(datapath+'basal_letters_postSac_nobinning')
-    gating_letters[:, postSacP].tofile(datapath+'gating_letters_postSac_nobinning')
+    # Compute average firing rate under basal and gating
+    basal_fr = basal_letters.mean(axis=0).tofile(datapath + 'basal_fr')
+    gating_fr = gating_letters.mean(axis=0).tofile(datapath + 'gating_fr')
+
+    #_pdb.set_trace()
+    noisy_g[:, preSacP].tofile(sacc_path+'g_preSac_nobinning')
+    basal_letters[:, preSacP].tofile(sacc_path+'basal_letters_preSac_nobinning')
+    gating_letters[:, preSacP].tofile(sacc_path+'gating_letters_preSac_nobinning')
+    noisy_g[:, postSacP].tofile(sacc_path+'g_postSac_nobinning')
+    basal_letters[:, postSacP].tofile(sacc_path+'basal_letters_postSac_nobinning')
+    gating_letters[:, postSacP].tofile(sacc_path+'gating_letters_postSac_nobinning')
 
     if not _np.all(basal_letters[:,0]==gating_letters[:,0]):
         print('basal_letters[:, 0] not equal to gating_letters[:,0]')
@@ -167,7 +174,7 @@ def data_summary():
     # I'm actually converting the transverse because I want binned_g[i] to be all 'g' values at time point i
     binned_g        = tuple(map(tuple, binned_g.T))
     binned_basal    = tuple(map(tuple, binned_basal.T))
-    binned_gating    = tuple(map(tuple, binned_gating.T))
+    binned_gating   = tuple(map(tuple, binned_gating.T))
 
     """
     basal_total_info = get_total_info_since_t0(binned_g, binned_basal, -.2)
@@ -175,25 +182,28 @@ def data_summary():
     mixed_total_info = get_total_info_since_t0(binned_g, binned_mixed, -.2)
     mixed_total_info.tofile(datapath+'mixed_total_info')
     """
-
+    
+    #_pdb.set_trace()
+    #return binned_g, binned_basal, binned_gating
     # computing information under basal and gating using different amount of letters
     print('Compute total information with N letters under basal or where the letters are taken from binned_gating')
-    for N in [1, 2, 10]:
-        basal_info   = get_info(binned_g, [binned_basal]*N)
-        basal_info.tofile(datapath+'mi_{0}b_0g_{1}ms'.format(N, letter_length_in_ms))
-        gating_info   = get_info(binned_g, [binned_gating]*N)
-        gating_info.tofile(datapath+'mi_0b_{0}g_{1}ms'.format(N, letter_length_in_ms))
+    for N in [1, 2, 8]:
+        basal_info   = mi(binned_g[N-1:], combine_consecutive_labels(binned_basal, N))
+        basal_info.tofile(datapath+'mi_{0}b_0g'.format(N))
+        gating_info   = mi(binned_g[N-1:], combine_consecutive_labels(binned_gating, N))
+        gating_info.tofile(datapath+'mi_0b_{0}g'.format(N))
 
     # compare the amount of information gained by the last letter (out of N) in several different cases:
     #   i.      both letters are under basal state
     #   ii.     letters are taken from gating response
+    #_pdb.set_trace()
     for i in [2, 4, 8]:
         print('Computing information last letter carries about g in a {0}L word when all letters come form basal nl'.format(i))
-        basal_cond_info = get_cond_info(binned_g, [binned_basal]*i)
-        basal_cond_info.tofile(datapath+'cond_mi_{0}b_0g_{1}ms'.format(i, letter_length_in_ms))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
+        basal_cond_info = cond_mi(binned_g, combine_consecutive_labels(binned_basal, i))
+        basal_cond_info.tofile(datapath+'cond_mi_{0}b_0g'.format(i))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
         print('Computing information last letter carries about g in a {0}L word when letters come from gating'.format(i))
-        gating_cond_info = get_cond_info(binned_g, [binned_gating]*i)
-        gating_cond_info.tofile(datapath+'cond_mi_0b_{0}g_{1}ms'.format(i, letter_length_in_ms))
+        gating_cond_info = cond_mi(binned_g, combine_consecutive_labels(binned_gating, i))
+        gating_cond_info.tofile(datapath+'cond_mi_0b_{0}g'.format(i))
     
     """
     # compute the amount of information the given letters convey about g. By "given letters" I mean an iter
@@ -212,16 +222,22 @@ def data_summary():
     basal_cond_info = get_cond_info(binned_g, [gating_letter, binned_basal])
     """
 
+    letters_N_list = [1,2,8]
+    for N in letters_N_list:
+        _integrate_information(letter_length_in_ms, N)
+        #_get_information_delivery_time(letter_length_in_ms, N, .8)
+        #get_info_per_spike(letter_length_in_ms, N)
+
     # make all plots
     plot_summary(letter_length_in_ms)
+
 
 def plot_summary(letter_length_in_ms):
     global g#, bin_rate, gating_start_t, gating_end_t
     
-    if g is None: 
-        g = _np.fromfile('LinearPrediction').reshape(-1,300)
+    bipolar = cell(letter_length_in_ms)
 
-    bipolar = cell()
+    g = bipolar.processAllImages()
 
     # plots that do not depend on letter length
     fig_g = plot_g(g, 100)
@@ -232,28 +248,69 @@ def plot_summary(letter_length_in_ms):
 
     bipolar.plot_noise_correlation(g)
     
-    plot_stats_from_TNF_fits()
+    plot_stats_from_TNF_fits(g)
+
+    get_image_correaltion()
 
     # plot how the simulation compares to gaussian flickering and the basal and gating nl
     bipolar.plot_gaussian_simulation_and_nls(g, [], [-.1,.1], [bipolar.nl_basal, bipolar.nl_gating, bipolar.nl_inh])
 
     # plot one TNF_psth and the result of fitting the model ot it
     still_psth, sac_psth, tax = load_TNF_PSTHs()
-    bipolar._fit_PSTH(sac_psth[1,:], 'pink', .1, 128, 96000, 96, range(0, 200,10), range(-50, 150, 10), 1)
+    bipolar._fit_PSTH(sac_psth[1,:], 'pink', .1, 128, 100, 96, range(0, 200,10), range(-50, 150, 10), 1)
     
-
     # plot that DO depend on letter length
     plot_calcium_information(letter_length_in_ms)
 
-    plot_letters_N(letter_length_in_ms)
+    plot_letters_N(letter_length_in_ms,[1,8],[])
     
+    plot_letters_N(letter_length_in_ms, [2,4,8],[])
+    datapath = path_template.replace('#', str(letter_length_in_ms))
+    _plt.gcf().savefig(datapath + 'letters_N2.pdf', transparent=True)
+
     plot_compare_nls(letter_length_in_ms)
 
     plot_binned_density(letter_length_in_ms)
     
     plot_densities(letter_length_in_ms)
 
-    plot_compare_letter_length([10, 25, 125])
+    plot_compare_gating_timing(letter_length_in_ms)
+
+    plot_compare_letter_length([25,50,75])
+    
+    plot_gating_vs_letter_length([5,25,50,75,100,125])
+
+    plot_information_delivery_time(letter_length_in_ms, [1,2,4,8], .85)
+
+    plot_integrated_information(letter_length_in_ms, [1,2,4,8])
+
+    plot_bits_per_spike(letter_length_in_ms, [1,2,4,8])
+
+
+def cartoon_summary():
+    '''
+    This is to show why the conditional information is needed
+    '''
+    stim = _fake_correlated_stim(3, 1, 1000)
+    tax = _np.arange(0, len(stim)*sim_delta_t, sim_delta_t)
+
+    mi_1L = _info.mi(stim,stim)
+    cond_mi = _info.cond_mi(stim[1:], stim[1:], stim[:-1])
+
+    _plt.plot(tax, stim)
+    print(mi_1L, cond_mi)
+
+def load_infoRatio1():
+    '''
+    Load arrays exported from igor with the ratio of the information (saccading/basal) for the 3 cell types (fast off, slow off and on)
+    File is named w_infoRatio1.txt
+    '''
+    info_ratio = _np.fromfile('w_infoRatio1.txt', sep=' ').reshape(3, -1)
+    info_ratio_sem = _np.fromfile('w_infoRatio1_sem.txt', sep=' ').reshape(3, -1)
+
+    fig = plot_info_ratio(info_ratio, info_ratio_sem)
+
+    return info_ratio, info_ratio_sem, fig
 
 def load_UFlicker_PSTH(i):
     '''
@@ -342,6 +399,194 @@ def load_TNF_PSTHs():
     return still_psth, sacc_psth, tax
 
 
+def _correlate_images(size):
+    '''
+    Load images from the DB, filter them with a disk of 'size' and autocorrelate the images (after downsampling)
+
+    Return the average image
+
+    size:   center size in degrees.
+
+    '''
+    global images_list
+    
+    #_pdb.set_trace()
+
+    if images_list is None:
+        _getImagesPath()
+
+    for i in range(len(images_list)):
+        print('correlating image {0} out of {1}'.format(i, len(images_list)))
+        image = _loadImage(i)
+
+        filtered_image = _nd.uniform_filter(image, size * pixperdegree, mode='constant')
+
+        filtered_image -= filtered_image.mean()
+        filtered_image /= filtered_image.std()
+
+        # I don't need pixel resolution and correlate is taking a long time. Therefore downsample
+        # at this point, every pixel corresponds to a cell of center 'size'
+        filtered_image = filtered_image[::pixperdegree/2,::pixperdegree/2]
+
+        if 'output' not in locals():
+            output = _np.zeros_like(filtered_image)
+
+        for i in range(1,filtered_image.shape[0]):
+            for j in range(1,filtered_image.shape[1]):
+                output[i,j] += _np.dot(filtered_image[i:,j:].flatten(), filtered_image[:-i,:-j].flatten())/filtered_image[i:,j:].size/len(images_list)
+        
+    output.tofile('Data/images_auto_corr')
+    return output
+
+def combine_consecutive_labels(labels, N):
+    '''
+    labels is a tuple of tuple such that labels[i][j] holds the label at time 'i' and trial 'j'
+    Concatenate N consecutive labels to form a word (either in stimulus or response)
+    '''
+
+    # if N == 1 maybe I shouldn't be calling this function but I include the flag here so that I don't have to worry about it when within loops
+    if N==1:
+        return labels
+
+    labels_to_pass = _np.dstack((labels[N-1:],labels[N-2:-1]))
+    for i in range(2, N):
+        labels_to_pass = _np.dstack((labels_to_pass, labels[(N-i-1):-i]))
+
+    
+    return tuple(map(lambda x: tuple(map(tuple, x)), labels_to_pass))
+
+def combine_labels(*labels):
+    '''
+    labels is a tuple of tuples of tuples 
+    labels[i][j][k]     is the ith 'label' passed [j] is the time and [k] is the cell in the simulation
+    for example is calling "combine_labels(basal_letters[1:], basal_letters[:-1])" then
+        labels[0] refers to basal_letters[1:]
+        labels[1] refers to basal_letters[:-1]
+
+    '''
+    labels = _np.dstack(labels)
+    return tuple(map(lambda x: tuple(map(tuple, x)), labels))
+
+def cond_mi(x, y, z):
+    '''
+    for each time point (axis 0) of x,y,z, compute MI(x[i], y[i] | z[i])
+    '''
+    #_pdb.set_trace()
+    time_pnts = len(x)
+    info = _np.zeros(time_pnts)
+
+    for i in range(time_pnts):
+        info[i] = _info.cond_mi(x[i], y[i], z[i])
+
+    return info
+
+
+def mi(x, y):
+    #_pdb.set_trace()
+
+    # x/y are tuples of tuples, such that x[i][j] represents sample j at time point i
+    time_pnts = len(x)
+    info = _np.zeros(time_pnts)
+
+    for i in range(time_pnts):
+        info[i] = _info.mi(x[i], y[i])
+
+    return info
+
+def report_Information_stats(letter_length_in_ms):
+    '''
+    Grab certain arrays and compute the peak, time to peak and peak duration
+    '''
+    #_pdb.set_trace()
+
+    datapath = path_template.replace('#', str(letter_length_in_ms))
+
+    basal_1L = _np.fromfile(datapath+'mi_1b_0g')
+    basal_cond = _np.fromfile(datapath+'cond_mi_2b_0g')
+    gating_cond = _np.fromfile(datapath+'cond_mi_0b_2g')
+
+    traces = [basal_1L, basal_cond, gating_cond]
+
+    # compute saccade point for the given letter_length
+    saccade_pnt = int(-sim_start_t*1000/letter_length_in_ms)
+
+    for trace in traces:
+        # compute the average in between start and saccade_pnt
+        avg_info = trace[:saccade_pnt+1].mean()
+
+        max_info = trace.max()
+
+        # threshold where 20% of the difference bewtween avg and max is reached
+        threshold = avg_info + 0.2*(max_info-avg_info)
+
+        points_above_threshold = _np.where(trace > threshold)
+        print('*'*72)
+        print('Maximum info is {0:2.2f}, and it is reached at {1}ms after the saccade'.format(max_info, (trace.argmax()-saccade_pnt)*letter_length_in_ms ))
+        print('start = ', (points_above_threshold[0][0]-saccade_pnt)*letter_length_in_ms)
+        print('end = ', (points_above_threshold[0][-1]-saccade_pnt)*letter_length_in_ms)
+
+    print('peak/peak ratio is: ', gating_cond.max()/basal_cond[gating_cond.argmax()])
+
+
+def get_image_correaltion():
+    # only run this if Figures/image_correlation.pdf does not exist
+    from os import listdir
+
+    if 'image_correlation.pdf' in listdir('Figures/'):
+        # Figure already exists, don't recomput it
+        return None
+    
+    corr = _np.fromfile('Data/images_auto_corr').reshape(-1,67)
+
+    #_pdb.set_trace()
+    dist = _np.arange(0, _np.sqrt(corr.shape[0]**2 + corr.shape[1]**2)*0.5, 0.25)
+    N = _np.zeros(len(dist))
+    out = _np.zeros(len(dist))
+
+    for i in range(1,corr.shape[0]-1):
+        for j in range(1,corr.shape[1]-1):
+            # for i, j, convert it into a distance and then into an index into dist
+            index = _np.round(_np.sqrt(i**2+j**2)*0.5/.25)
+
+            N[index]    += 1
+            out[index]  += corr[i,j]
+
+    out = _np.divide(out, N)
+            
+    out[0]=1
+            
+    _plt.close('image_correlation')
+    fig, ax = _plt.subplots(num='image_correlation')
+
+    ax.plot(dist, out, 'o')
+
+    xticks = range(0,10,2)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    ax.set_xlabel(r'$Angle\, (\degree)$')
+
+    # add vertical line at experimental center size
+    ax.plot([saccade_size]*2, ax.get_ylim(), ':k')
+
+    yticks = _np.arange(0, 1.1, .5)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_ylabel(r'$Autocorrelation$')
+
+    ax.set_xlim(0,10)
+
+    ax.tick_params(length=3, right='off', top='off')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    fig.subplots_adjust(left=.3, bottom=.3, right=1,top=1)
+    fig.set_size_inches(2.5,2)
+
+    fig.savefig('Figures/image_correlation.pdf', tranparent=True)
+    return out
+    
+
+
 def get_cond_info(binned_g, letters_list):
     '''
     Compute I(g(t) ; letters_list[-1](t) | letters_list[:-1](at previous times))
@@ -385,7 +630,7 @@ def get_cond_info(binned_g, letters_list):
             #                       i=1-> letters_list[1][p-1*letters_delta_p]
             z += (letters_list[i][p-(lettersN-i-1)],)
         
-        newZ = _info.combine_labels(*z)
+        #newZ = tuple(zip(z))
         cond_info[p] = _info.cond_mi(x, y, newZ)
 
     return cond_info
@@ -426,15 +671,48 @@ def get_info(binned_g, letters_list):
             # When there is only 1 letter in letters_list, N-i-1 = 0 and 'y' is taken at point 'p' as is 'x'. With two letters, first one is taken at 'p-letters_delta_p' and second one is taken at 'p'
             y += (letters_list[i][p-(lettersN-i-1)],)
         
-        newY = _info.combine_labels(*y)
+        newY = tuple(zip(y))#_info.combine_labels(*y)
         info[p] = _info.mi(x, newY)
 
     return info
 
-def average(array_in, pnts):
+def average(array_in, pnts, flag):
     '''
-    return a version of array that has been resampled down by pnts
+    return a version of array that has been resampled down by pnts along the last dimension (I'm thinking that last dimension in array_in represents time)
+    
+    input:
+    ------
+        flag:       allows for different computations to be performed when array_in does not have an integer number of pnts.
+                    0, raise an error
+                    1, throw away extra points at the end
+                    2. throw away extra points at the beginning
+                    3, average fewer points in the 1st bin
+                    4, average fewer points in the last bin
+            
+    Implementation Notes: I will reshape array_in into a 2d array such that shape[1] = pnts. Then I'll compute the mean along axis = 1. Then reshape back into something with the same number in the 1st dimensions of shape
+
     '''
+
+    extra_points = array_in.size%pnts
+    if extra_points:
+        if flag == 0:
+            raise ValueError('naturalscenes.average: array_in.size is not an integer number of pnts')
+        elif flag == 1:
+            array_in = array_in[:-extra_points]
+        elif flag == 2:
+            array_in = array_in[extra_points:]
+        elif flag == 3:
+            first_bin = array_in[:extra_points].mean()
+            array_in = _np.concatenate((_np.ones(pnts-extra_points)*first_bin, array_in.flatten()), axis=0)
+        elif flag == 4:
+            last_bin = array_in[-extra_points:].mean()
+            array_in = _np.concatenate((array_in.flatten(), _np.ones(pnts-extra_points)*last_bin), axis=0)
+
+    shape_out = array_in.shape[:-1] + (-1,)
+    #array_out = array_in.reshape(-1, pnts).mean(axis=1).reshape(shape_out)
+    return array_in.reshape(-1, pnts).mean(axis=1).reshape(shape_out)
+
+    """
     #_pdb.set_trace()
     # make an array of length pnts with 1/pnts
     weights = _np.ones(pnts)/pnts
@@ -452,7 +730,7 @@ def average(array_in, pnts):
     outArray = avgArray[:, range(0, array_in.shape[1], pnts)]
 
     return outArray
-
+    """
 
 def _getImagesPath(path=None):
     if path is None:
@@ -503,7 +781,7 @@ def _getEyeSeq(filter_length):
 
     output:
     -------
-        seq:    2D ndarray with steps
+        seq:    2D ndarray with steps in pixels
     '''
 
     stepsN = int((sim_end_t-sim_start_t)/sim_delta_t + filter_length - 1)
@@ -515,19 +793,68 @@ def _getEyeSeq(filter_length):
     # add saccade in both x and y for the time being. The distribution of LP I'm getting is skewed to the right as if most images were transitioning from light to dark patches.
 # I think this might be due to the fact that I'm always saccading in the same direction (may be from sky to dirt). I will randomize here the direction of the saccade but keeping both fixational points the same.
     saccadePnt = int(filter_length - 1 - sim_start_t/sim_delta_t)
-    if _np.random.rand() > 0.5:
+
+    # since I'm making saccade in both x and y, amplitud of saccade is sqrt(2)*saccade_size*pixperdegree, in order to have it be of the required size I have to divide by sqrt(2)
+    # If making saccades in along only x and/or y the sqrt(2) shouldn't be there and for a general saccade with angle alpha with respect ot the x axis, x
+    angle_with_x_axis = _np.random.rand()*2*_np.pi
+    #_pdb.set_trace()
+    jump_x = saccade_size * pixperdegree * _np.cos(angle_with_x_axis)
+    jump_y = saccade_size * pixperdegree * _np.sin(angle_with_x_axis)
+    if jump_x > 0:
         # saccade in the usual way
-        seq[:,saccadePnt] += saccade_size*pixperdegree
+        seq[0,saccadePnt] += jump_x
+    else:
+        seq[0,0] += jump_x
+        seq[0,saccadePnt] -= jump_x
+    if jump_y > 0:
+        seq[1,saccadePnt] += jump_y
     else:
         # saccade backwards
-        seq[:,0] += saccade_size*pixperdegree
-        seq[:,saccadePnt] -= saccade_size*pixperdegree
+        seq[1,0] += jump_y
+        seq[1,saccadePnt] -= jump_y
 
     # change from steps to actual positions
     seq = seq.cumsum(1)
 
     return seq.astype('int16')
 
+
+def _get_jitter_velocity():
+    global saccade_size
+
+    #_pdb.set_trace()
+    # remove saccade from eye sequence
+    saccade_size_ori = saccade_size
+    saccade_size = 0
+
+    # make sequence 1D
+    eye_seq = _getEyeSeq(117)
+    eye_seq[1,:] += eye_seq[0,-1]-eye_seq[1,0]
+    eye_seq = eye_seq.reshape(-1,)
+
+    # convert from pixels to degrees
+    eye_seq = eye_seq.astype(float)
+    eye_seq /= pixperdegree
+
+    # smooth position
+    N = 5
+    smoothing_filter = _np.ones(N)*1/N
+    smoothed = _np.correlate(eye_seq, smoothing_filter)
+
+    # change from position to velocity
+    vel = _np.diff(smoothed)
+
+    # and from vel to speed
+    speed = abs(vel)
+    
+    # compute average speed
+    avg_speed = speed.mean()/(sim_delta_t*len(speed))
+
+
+    saccade_size = saccade_size_ori
+    
+    print('Average speed is: ', avg_speed, 'degrees per second')
+    return eye_seq, smoothed, vel, speed, avg_speed
 
 def _get_ploting_TAX(letter_length_in_s):
     tax = _np.arange(sim_start_t, sim_end_t, letter_length_in_s)
@@ -599,10 +926,12 @@ def plot_calcium_information(letter_length):
 
     datapath = path_template.replace('#', str(letter_length))
     tax = _get_ploting_TAX(letter_length/1000)
-    basal_info_1L = _np.fromfile(datapath+'mi_1b_0g_{0}ms'.format(letter_length))
-    #basal_info_2L = _np.fromfile(datapath+'mi_2b_0g_{0}ms'.format(letter_length))
-    gating_info_1L = _np.fromfile(datapath+'mi_0b_1g_{0}ms'.format(letter_length))
-    #gating_info_2L = _np.fromfile(datapath+'mi_0b_2g_{0}ms'.format(letter_length))
+    basal_info_1L = _np.fromfile(datapath+'mi_1b_0g')
+    basal_info_2L = _np.fromfile(datapath+'mi_2b_0g')
+    basal_info_8L = _np.fromfile(datapath+'mi_8b_0g')
+    gating_info_1L = _np.fromfile(datapath+'mi_0b_1g')
+    gating_info_2L = _np.fromfile(datapath+'mi_0b_2g')
+    gating_info_8L = _np.fromfile(datapath+'mi_0b_8g')
     
     #_pdb.set_trace()
     _plt.close('calcium_information')
@@ -610,8 +939,10 @@ def plot_calcium_information(letter_length):
 
     ax.plot(tax, gating_info_1L, 'b', lw=2, label="gating")
     #ax.plot(tax, gating_info_2L, ':b', lw=2, label="0b 2g")
+    #ax.plot(tax, gating_info_10L, ':b', lw=2, label="0b 10g")
     ax.plot(tax, basal_info_1L, 'r', lw=2, label="basal")
     #ax.plot(tax, basal_info_2L, ':r', lw=2, label="2b 0g")
+    #ax.plot(tax, basal_info_10L, ':r', lw=2, label="2b 10g")
 
     ax.plot([0,0], (0, ax.get_ylim()[1]), ':k', label='_nolegend_')
 
@@ -899,15 +1230,15 @@ def plot_compare_nls(letter_length):
 
     #_pdb.set_trace()
     # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
-    basal_2L = _np.fromfile(datapath+'cond_mi_2b_0g_{0}ms'.format(letter_length))
-    gating_2L = _np.fromfile(datapath+'cond_mi_0b_2g_{0}ms'.format(letter_length))
+    basal_8L = _np.fromfile(datapath+'cond_mi_8b_0g')
+    gating_8L = _np.fromfile(datapath+'cond_mi_0b_8g')
 
     """
     start_p = time_to_point(gating_start_t, 0)
     end_p = time_to_point(gating_end_t, 0)
 
-    gating = basal_2L.copy()
-    gating[start_p:end_p] = gating_2L[start_p:end_p]
+    gating = basal_8L.copy()
+    gating[start_p:end_p] = gating_8L[start_p:end_p]
 
     # get the tax if it doesn't exist
     #ax.plot(tax[:start_p], gating[:start_p], 'r', lw=2)
@@ -915,8 +1246,8 @@ def plot_compare_nls(letter_length):
     #ax.plot(tax[end_p:], gating[end_p:], 'r', lw=2)
     """
     tax = _get_ploting_TAX(letter_length/1000)
-    ax.plot(tax, basal_2L+basal_2L.max()/100, ':r', lw=2, label = r'$basal$')
-    ax.plot(tax, gating_2L, 'b', lw=2, label=r'$gating$')
+    ax.plot(tax, basal_8L+basal_8L.max()/100, ':r', lw=2, label = r'$basal$')
+    ax.plot(tax, gating_8L, 'b', lw=2, label=r'$gating$')
 
     #ax.plot(tax, gating, 'b', lw=2, label=r'$gating$')
     #ax.plot(tax, cond_mi_4L, '-.r', lw=2, label='4L')
@@ -987,8 +1318,8 @@ def plot_letter_length():
 def plot_gating_effect(letter_length):
     from os import listdir
 
-    # get the list of files in datapath+'' with gating_effect_2L_{0}ms
-    gating_file = [name for name in listdir(datapath+'') if name.startswith('gating_effect_2L_{0}ms'.format(letter_length))][0]
+    # get the list of files in datapath+'' with gating_effect_2L
+    gating_file = [name for name in listdir(datapath+'') if name.startswith('gating_effect_2L')][0]
     nogating_file = [name for name in listdir(datapath+'') if name.startswith('nogating_effect_2L_{0}'.format(letter_length))][0]
 
     gating = _np.fromfile(datapath+''+gating_file)
@@ -1013,25 +1344,26 @@ def plot_densities(letter_length):
     Plot histograms after binning the data (g, basal and gating)
     '''
     datapath = path_template.replace('#', str(letter_length))
+    sacc_path = 'Sacc={0}, RWS=.0{1}/'.format(saccade_size, int(rw_step*100))
     
     #_pdb.set_trace()
 
     # Load g and letters before binning
-    g_pre       = _np.fromfile(datapath+'g_preSac_nobinning')
-    g_post      = _np.fromfile(datapath+'g_postSac_nobinning')
-    basal_pre   = _np.fromfile(datapath+'basal_letters_preSac_nobinning')
-    basal_post  = _np.fromfile(datapath+'basal_letters_postSac_nobinning')
-    gating_pre   = _np.fromfile(datapath+'gating_letters_preSac_nobinning')
-    gating_post  = _np.fromfile(datapath+'gating_letters_postSac_nobinning')
+    g_pre       = _np.fromfile(sacc_path+'g_preSac_nobinning')
+    g_post      = _np.fromfile(sacc_path+'g_postSac_nobinning')
+    basal_pre   = _np.fromfile(sacc_path+'basal_letters_preSac_nobinning')
+    basal_post  = _np.fromfile(sacc_path+'basal_letters_postSac_nobinning')
+    gating_pre   = _np.fromfile(sacc_path+'gating_letters_preSac_nobinning')
+    gating_post  = _np.fromfile(sacc_path+'gating_letters_postSac_nobinning')
 
     _plt.close('densities')
     fig, ax = _plt.subplots(nrows=3, num='densities')
 
-    _, bins, _= ax[0].hist(g_post, bins=200, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=120ms$')
+    _, bins, _= ax[0].hist(g_post, bins=200, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=100ms$')
     ax[0].hist(g_pre, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=-100ms$')
     _, bins, _ = ax[1].hist(gating_pre, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=-100ms$')
     ax[1].hist(basal_pre, bins=bins, normed=True, histtype='step', lw=2, alpha=1, label=r'$basal, t=-100ms$')
-    _, bins, _ = ax[2].hist(gating_post, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=120ms$')
+    _, bins, _ = ax[2].hist(gating_post, bins=200, normed=True, histtype='step', lw=2, alpha=1, label=r'$gating, t=100ms$')
     ax[2].hist(basal_post, bins=bins, normed=True, histtype='step', alpha=1, lw=2, label=r'$basal, t=-100ms$')
 
     #ax[0].text(500, .008, 'LP')
@@ -1069,32 +1401,49 @@ def plot_binned_density(letter_length):
     _plt.close('binned_density')
     fig, ax = _plt.subplots(nrows=3, num='binned_density')
 
-    _, bins, _ = ax[0].hist(binned_g_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=120ms$')
-    ax[0].hist(binned_g_pre, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=-100ms$')
+    hatch = ('xxx', None, 'x', '-','o','/','\\',None, '*','\/')
+    _, bins, _ = ax[0].hist([binned_g_post, binned_g_pre], bins=binsN, color='gy', normed=True, histtype='bar', alpha=.6, label=[r'$t=100ms$', r'$t=-100ms$'])
+    #ax[0].hist(binned_g_pre, bins=bins, normed=True, histtype='stepfilled', alpha=.5, label=r'$lp, t=-100ms$')
 
-    _, bins, _ = ax[1].hist([binned_gating_pre, binned_basal_pre], bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=[r'$gating, t=-100ms$', r'$basal$'])
-    #ax[1].hist(binned_basal_pre, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=-100ms$')
+    #_pdb.set_trace()
+    _, bins, patches = ax[1].hist([binned_basal_pre, binned_gating_pre], color = 'yy', bins=binsN, normed=True, histtype='bar', alpha=.8, label=[r'$basal$', r'$gating$'])
+    for i, patch in enumerate(patches):
+        for bar in patch:
+            bar.set_hatch(hatch[i])
 
-    _, bins, _ = ax[2].hist([binned_gating_post, binned_basal_post], bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=[r'$gating, t=120ms$', r'$basal$'])
-    #ax[2].hist(binned_basal_post, bins=binsN, normed=True, histtype='stepfilled', alpha=.5, label=r'$basal, t=120ms$')
 
-    ax[0].set_xlim(1,16)
-    ax[1].set_xlim(1,16)
-    ax[2].set_xlim(1,16)
+    _, bins, patches = ax[2].hist([binned_basal_post, binned_gating_post], bins=binsN, color='gg', normed=True, histtype='bar', alpha=.8, label=[r'$basal$', r'$gating$'])
+    for i, patch in enumerate(patches):
+        for bar in patch:
+            bar.set_hatch(hatch[i])
+
+    ax[0].text(2, ax[0].get_ylim()[1]*.8, r'$Linear Prediction$')
+    ax[1].text(8, ax[1].get_ylim()[1]*.8, r'$t=-100ms$')
+    ax[2].text(8, ax[2].get_ylim()[1]*.8, r'$t=100ms$')
+    #ax[0].set_xlim(1,16)
+    #ax[1].set_xlim(4,16)
+    #ax[2].set_xlim(4,16)
 
     #ax[0].text(14, .08, 'LP')
     #ax[1].text(14, 1, r'$basal$')
     #ax[2].text(14, .5, r'$gating$')
 
-    ax[0].legend(loc='upper right', fontsize=10, handlelength=1.5)
-    ax[1].legend(loc='upper right', fontsize=10, handlelength=1.5)
-    ax[2].legend(loc='upper right', fontsize=10, handlelength=1.5)
+    #xticks = range(5,17)
+    #xlabels = range(0,12)
+    #ax[1].set_xticklabels(xlabels, fontsize=10)
+    #ax[2].set_xticklabels(xlabels, fontsize=10)
 
+    ax[0].legend(loc='best')#upper right')#, fontsize=10, handlelength=2)
+    ax[1].legend(loc='best')#'upper right')#, fontsize=10, handlelength=2)
+    ax[2].legend(loc='best')#'upper right')#, fontsize=10, handlelength=2)
+
+    fig.subplots_adjust(left=0, right=.95)
+    fig.set_size_inches(10,6)
     fig.savefig(datapath + 'binned_density.pdf', transparent=True)
 
     return fig
 
-def plot_letters_N(letter_length):
+def plot_letters_N(letter_length, basal_lettersN, gating_lettersN):
     '''
     plot several arrays, each containing the information the last letter carries about g given the previous letters. Each trace in the word is for a different number of letters per word.
 
@@ -1110,17 +1459,37 @@ def plot_letters_N(letter_length):
     tax = _get_ploting_TAX(letter_length/1000)
 
     # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
-    mi_1L = _np.fromfile(datapath+'mi_1b_0g_{0}ms'.format(letter_length))
-    cond_mi_2L = _np.fromfile(datapath+'cond_mi_2b_0g_{0}ms'.format(letter_length))
-    cond_mi_4L = _np.fromfile(datapath+'cond_mi_4b_0g_{0}ms'.format(letter_length))
-    cond_mi_8L = _np.fromfile(datapath+'cond_mi_8b_0g_{0}ms'.format(letter_length))
+    mode = ['r', 'r:', 'r--', 'r-.']
+    for n in basal_lettersN:
+        mode_index = int(_np.log2(n))
+        if n == 1:
+            mi = _np.fromfile(datapath+'mi_1b_0g')
+        else:
+            mi = _np.fromfile(datapath+'cond_mi_{0}b_0g'.format(n, letter_length))
 
-    # get the tax if it doesn't exist
-    tax = _get_ploting_TAX(letter_length/1000)
+        ax.plot(tax, mi, mode[mode_index], lw=2, label=r'${0}$'.format(n))
+
+    mode = ['b','b:', 'b--', 'b-.']
+    for n in gating_lettersN:
+        mode_index = int(_np.log2(n))
+        if n == 1:
+            mi = _np.fromfile(datapath+'mi_0b_1g')
+        else:
+            mi = _np.fromfile(datapath+'cond_mi_0b_{0}g'.format(n, letter_length))
+
+        ax.plot(tax, mi, mode[mode_index], lw=2, label=r'${0}$'.format(n))
+
+    """
+    mi_1L = _np.fromfile(datapath+'mi_1b_0g')
+    cond_mi_2L = _np.fromfile(datapath+'cond_mi_2b_0g')
+    cond_mi_4L = _np.fromfile(datapath+'cond_mi_4b_0g')
+    cond_mi_8L = _np.fromfile(datapath+'cond_mi_8b_0g')
+
     ax.plot(tax, mi_1L, 'r', lw=2, label=r'$1L$')
     ax.plot(tax, cond_mi_2L, ':r', lw=2, label=r'$2L$')
     #ax.plot(tax, cond_mi_4L, ':r', lw=2, label='4L')
     #ax.plot(tax, cond_mi_8L, ':r', lw=2, label='8L')
+    """
 
     ax.plot([0,0], ax.get_ylim(), ':k', label='_nolegend_')
 
@@ -1142,9 +1511,75 @@ def plot_letters_N(letter_length):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    fig.subplots_adjust(left=.2, bottom=.2, right=1, top=1)
+    fig.subplots_adjust(left=.2, bottom=.3, right=1, top=1)
     fig.set_size_inches(2.5, 2)
     fig.savefig(datapath + 'letters_N.pdf', transparent=True)
+
+    return fig
+
+def plot_letters_N2(letter_length, basal_flag=1):
+    '''
+    plot several arrays, each containing the information the last letter carries about g given the previous letters. Each trace in the word is for a different number of letters per word.
+
+    letter_length is an int in ms
+
+    basal_flag      = 0,    plots basal cond info
+                    = 1,    plots gating cond info
+                    
+    '''
+    
+    datapath = path_template.replace('#', str(letter_length))
+    
+    #_pdb.set_trace()
+    _plt.close('letters_N2')
+    fig, ax = _plt.subplots(num='letters_N2')
+
+    tax = _get_ploting_TAX(letter_length/1000)
+
+    # get all the files in current folder with MI of word and linear prediction decompossed as contributions of each letter
+    if basal_flag:
+        mi_1L = _np.fromfile(datapath+'mi_1b_0g')
+        cond_mi_2L = _np.fromfile(datapath+'cond_mi_2b_0g')
+        cond_mi_4L = _np.fromfile(datapath+'cond_mi_4b_0g')
+        cond_mi_8L = _np.fromfile(datapath+'cond_mi_8b_0g')
+        gating_mi_2L = _np.fromfile(datapath+'cond_mi_0b_2g')
+    else:
+        mi_1L = _np.fromfile(datapath+'mi_0b_1g')
+        cond_mi_2L = _np.fromfile(datapath+'cond_mi_0b_2g')
+        cond_mi_4L = _np.fromfile(datapath+'cond_mi_0b_2g')
+        cond_mi_8L = _np.fromfile(datapath+'cond_mi_0b_2g')
+
+    # get the tax if it doesn't exist
+    tax = _get_ploting_TAX(letter_length/1000)
+    ax.plot(tax, mi_1L, lw=2, label=r'$1L$')
+    ax.plot(tax, cond_mi_2L, lw=2, label=r'$2L$')
+    ax.plot(tax, cond_mi_4L, lw=2, label=r'$4L$')
+    ax.plot(tax, cond_mi_8L, lw=2, label=r'$8L$')
+    ax.plot(tax, gating_mi_2L, lw=2)
+
+    ax.plot([0,0], ax.get_ylim(), ':k', label='_nolegend_')
+
+    ax.legend(fontsize=10, handlelength=1.5, frameon=False,bbox_to_anchor=(1.05,1.2))
+
+    xticks = _np.arange(-.2, .8, .4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    yticks = range(0, int(ax.get_ylim()[1]+1), 1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlim(-.2, .8)
+
+    ax.tick_params(right='off', top='off', length=3)
+    ax.set_xlabel(r'$Time\,(s)$')
+    ax.set_ylabel(r'$Informaton\,(Bits)$')
+    
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    fig.subplots_adjust(left=.2, bottom=.2, right=1, top=.9)
+    fig.set_size_inches(2.5, 2)
+    fig.savefig(datapath + 'letters_N2.pdf', transparent=True)
 
     return fig
 
@@ -1173,18 +1608,26 @@ def plot_compare_letter_length(letter_length_list):
     for the given letters, compare some type of curve, either the conditional information with 2L or the total information
     '''
 
+    #_pdb.set_trace()
     try:
         _plt.close('compare_letter_length')
         fig, ax = _plt.subplots(num = 'compare_letter_length')
 
-        for letter_length in letter_length_list:
+        line_style = ['bo', 'g*', 'rs', 'mx', 'm^']
+        for i, letter_length in enumerate(letter_length_list):
             datapath = path_template.replace('#', str(letter_length))
 
             tax = _get_ploting_TAX(letter_length/1000)
-            trace = _np.fromfile(datapath + 'cond_mi_0b_2g_{0}ms'.format(letter_length))
+            trace = _np.fromfile(datapath + 'cond_mi_2b_0g')
+            N = len(tax)
+            newN = 15
+            #ax.plot(tax[::N/newN], trace[::N/newN], line_style[i], markersize=4, lw=2, label = '{0}ms'.format(letter_length))
             ax.plot(tax, trace, lw=2, label = '{0}ms'.format(letter_length))
 
-        ax.legend(loc=1, fontsize=10, handlelength=1.5, bbox_to_anchor = (1.2, 1.2))
+        ax.legend(loc=1, fontsize=10, handlelength=1.5, bbox_to_anchor = (1, 1))
+
+        # add vertical dotted line at saccade
+        ax.plot([0,0], ax.get_ylim(), ':k', label='_nolegend_', lw=2)
 
         xticks = _np.arange(-.2, .8, .4)
         ax.set_xticks(xticks)
@@ -1199,35 +1642,312 @@ def plot_compare_letter_length(letter_length_list):
         ax.set_xlabel(r'$Time\, (s)$')
 
         ax.tick_params(length=3, right='off', top='off')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        fig.set_size_inches(2.5, 2)
+        fig.subplots_adjust(left=.2, bottom=.3, right=1, top=1)
 
-        fig.set_size_inches(2.5, 2.5)
-        fig.subplots_adjust(left=.3, bottom=.3, right=.9, top=.9)
 
-
-        fig.savefig('Figures/compare_letter_length')
+        fig.savefig('Figures/compare_letter_length.pdf', transparent=True)
     except:
         print("plot_compare_letter_length failed, most likely because it couldn't load one of the cond_mi arrays")
         _plt.close('compare_letter_length')
 
-"""
-def clean_plot(fig, output_name="", axis=True, ticks=True, ticklabels=True, axeslabels=True, figtitle=True, axtitle=True, spines):
-    '''
-    given a fig, get all the axes and remove all objects that are Trued
-    if output_name is not "", save the fig with the given name
-    '''
-    axes = fig.get_axes()
-    for ax in axes:
-        if axis:
-            ax.set_axis_off()
+
+def plot_info_ratio(info_ratio, info_ratio_sem):
+    _plt.close('info_ratio')
+    fig, ax = _plt.subplots(num='info_ratio')
+
+    igor_delta_t = 0.048
+    tax = _np.arange(0, info_ratio.shape[1]*igor_delta_t, igor_delta_t)
+    
+    colors = 'rgc'
+    for i in range(info_ratio.shape[0]):
+        ax.errorbar(tax, info_ratio[i,:], yerr=info_ratio_sem[i,:], color = colors[i], lw=2)
+
+    xticks = _np.arange(0, 0.5, 0.4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    yticks = range(0, 5, 2)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlabel(r'$Time\,(s)$', fontsize=10)
+    ax.set_ylabel(r'$Information\, ratio$', fontsize=10)
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3, top='off', right='off')
+    fig.subplots_adjust(left=.3, bottom=.3, top=.95, right=1)
+    fig.set_size_inches(2.5, 1.5)
 
-    if output_name != "":
-        fig.savefig(output_name)
+    fig.savefig('Figures/info_ratio.pdf', transparent=True)
+    return fig
+
+def plot_compare_gating_timing(letter_length_in_ms):
+    '''
+    plot a comparisson between the experimental information_ratio computed in igor when there is peripheral input and no central change and the simulation with natural scenes with no peripheral input, showing that gating occurs at the same time as the central information changes.
+
+    I'm going to make plot from -.2s, so I'll get the tax and traces from 'info_ratio' and add some points at the beginning
+    '''
+    # First load data from igor (Summary of TNF), will generate a plot as well
+    info_ratio, info_ratio_sem, fig = load_infoRatio1()
+
+    # get x axis from the plot made by 'load_infoRatio1' (plot is called 'info_ratio')
+    exp_xdata = fig.gca().get_lines()[0].get_xdata()
+
+
+    # start a new plot
+    _plt.close('compare_gating_timing')
+    fig, ax = _plt.subplots(num='compare_gating_timing')
+
+    # add the 1st line from 'info_ratio to the plot I'm making
+    ax.errorbar(exp_xdata, info_ratio[0,:], yerr=info_ratio_sem[0,:], color='r', lw=2)
+    ax.errorbar(exp_xdata, info_ratio[1,:], yerr=info_ratio_sem[0,:], color='g', lw=2)
+    ax.errorbar(exp_xdata, info_ratio[2,:], yerr=info_ratio_sem[0,:], color='c', lw=2)
+
+    # add data prior to 0s for better displaying
+    #exp_negative_xdata = exp_xdata[::-1]*-1
+    #ax.plot(exp_negative_xdata, _np.ones_like(exp_negative_xdata)*info_ratio[0,0], ':r', markersize=2, lw=2)
+    #ax.plot(exp_negative_xdata, _np.ones_like(exp_negative_xdata)*info_ratio[1,0], ':g', markersize=2, lw=2)
+    #ax.plot(exp_negative_xdata, _np.ones_like(exp_negative_xdata)*info_ratio[2,0], ':c', markersize=2, lw=2)
+
+    # Add the simulated line with conditional information in the 8L case under basal nonlinearity
+    letter_length = letter_length_in_ms/1000
+    datapath = path_template.replace('#', str(letter_length_in_ms))
+    tax = _np.arange(sim_start_t, sim_end_t, letter_length)
+    cond_mi_8b_0g = _np.fromfile(datapath + 'cond_mi_8b_0g'.format(letter_length_in_ms))
+    ax.plot(tax[:-1], cond_mi_8b_0g[:-1], 'k', lw=2)
+
+
+    # add vertical line at saccade
+    ax.plot([0,0], ax.get_ylim(), ':k')
+
+    xticks = _np.arange(-.2, 0.8, 0.4)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    ax.set_xlim(-.2, .8)
+    yticks = range(0, 5, 2)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_xlabel(r'$Time\,(s)$', fontsize=12)
+    ax.set_ylabel(r'$Information$', fontsize=12)
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3, top='off', right='off')
+    fig.subplots_adjust(left=.2, bottom=.2, top=.95, right=1)
+    fig.set_size_inches(2.5, 2)
+
+    fig.savefig('Figures/compare_gating_timing.pdf', transparent=True)
+
+
+def plot_gating_vs_letter_length(letter_length_list):
+    '''
+    Compare the effect of gating as a function of letter length
     
+    load files of the form cond_mi_2b_0g_#ms and cond_mi_0b_2g_#ms and compute the ratio between gating and no gating and display it as a function of letter_length
+    '''
+
+    #_pdb.set_trace()
+    try:
+        ratios = []
+
+        for length in letter_length_list:
+            datapath = path_template.replace('#', str(length))
+            basal = _np.fromfile(datapath + 'cond_mi_2b_0g'.format(length))
+            gating = _np.fromfile(datapath + 'cond_mi_0b_2g'.format(length))
+
+            #ratios.append(gating.max()/basal[gating.argmax()])
+            gating_start_p = int((gating_start_t - sim_start_t)*1000/length)
+            gating_end_p = int((gating_end_t - sim_start_t)*1000/length)
+
+            ratios.append(gating[gating_start_p:gating_end_p].mean()/basal[gating_start_p:gating_end_p].mean())
+
+        _plt.close('gating_vs_letter_length')
+        fig, ax = _plt.subplots(num='gating_vs_letter_length')
+        
+        ax.plot(letter_length_list, ratios, 'ok')
+
+        ax.set_xticks(letter_length_list)
+        ax.set_xticklabels(letter_length_list, fontsize=10)
+        #ax.set_xscale('log')
+        ax.set_xlabel(r'$Letter\, length (ms)$')
+        ax.set_xlim(0, letter_length_list[-1]+10)
+
+        yticks = range(0, 3, 1)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(yticks, fontsize=10)
+        ax.set_ylabel(r'$Information\, Ratio$')
+        ax.set_ylim(.5, 3)
+
+        # Add doted line at y=1
+        ax.plot(ax.get_xlim(), [1,1], ':k')
+
+        fig.subplots_adjust(left=.2, bottom=.3, top=1, right=1)
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(length=3, right='off', top='off')
+        fig.set_size_inches(2.5, 2)
+
+        fig.savefig('Figures/plot_gating_vs_letter_length.pdf')
+
+    except:
+        _plt.close('gating_vs_letter_length')
+
+
+def plot_integrated_information(letter_length_in_ms, letters_N_list):
+    basal = []
+    gating = []
+
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+
+    # Figure out the points corresponding to t = 0s and t = inhibition_end_t
+    p0 = int(-sim_start_t*1000/letter_length_in_ms)
+    p1 = int((inhibition_end_t-sim_start_t)*1000/letter_length_in_ms)
+    
+    for N in letters_N_list:
+        basal_info = _np.fromfile(datapath + 'integrated_info_{0}b_0g'.format(N))
+        gating_info = _np.fromfile(datapath + 'integrated_info_0b_{0}g'.format(N))
+        basal.append(basal_info[p1]-basal_info[p0])
+        gating.append(gating_info[p1]-gating_info[p0])
+
+    # make the plot
+    _plt.close('integrated_information')
+    fig, ax = _plt.subplots(num='integrated_information')
+
+    ax.plot(letters_N_list, basal, 'ro', label=r'$basal$')
+    ax.plot(letters_N_list, gating, 'bo', label=r'$gating$')
+
+    xticks = [1,2,4,8]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    ax.set_xlabel(r'$Letters N$')
+    ax.set_xlim(0, 9)
+
+    yticks = range(0, 10, 1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_ylabel(r'$Information$')
+    ax.set_ylim(3.5, 6.5)
+
+    ax.text(5, 5.8, r'$basal$', color='r')
+    ax.text(5, 5.2, r'$gating$', color='b')
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3, right='off', top='off')
+    fig.subplots_adjust(left=0.3, bottom=.3, top=1, right=1)
+    fig.set_size_inches(2.5, 1.5)
+
+    fig.savefig(datapath + 'integrated_information.pdf', transparent=True)
+
+def plot_information_delivery_time(letter_length_in_ms, letters_N_list, threshold):
+    _pdb.set_trace()
+    basal = []
+    gating = []
+
+    for N in letters_N_list:
+        times = _get_information_delivery_time(letter_length_in_ms, N, threshold)
+        basal.append(times[0])
+        gating.append(times[1])
+
+    # make the plot
+    _plt.close('information_delivery_time')
+    fig, ax = _plt.subplots(num='information_delivery_time')
+
+    ax.plot(letters_N_list, basal, 'ro', label=r'$basal$')
+    ax.plot(letters_N_list, gating, 'bo', label=r'$gating$')
+
+    xticks = [1,2,4,8]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    ax.set_xlabel(r'$Letters N$')
+    ax.set_xlim(0, 9)
+
+    yticks = _np.arange(0.05, 0.4, 0.1)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_ylabel(r'$Delivery\, Time$')
+    ax.set_ylim(0, .4)
+
+    #ax.legend(fontsize=10, bbox_to_anchor=(0.75, 1.2))
+    ax.text(5,.35, r'$basal$', color='r')
+    ax.text(5,.27, r'$gating$', color='b')
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3, right='off', top='off')
+    fig.subplots_adjust(left=0.3, bottom=.3, top=.951, right=1)
+    fig.set_size_inches(2.5, 1.5)
+
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+    fig.savefig(datapath + 'information_delivery_time.pdf', transparent=True)
+
+def plot_bits_per_spike(letter_length_in_ms, letters_N_list):
+    '''
+    bits per spike as a function of word length
+    '''
+    basal = []
+    gating = []
+    ratio = []
+    for N in letters_N_list:
+        info_per_spike = get_info_per_spike(letter_length_in_ms, N)
+        basal.append(info_per_spike[0])
+        gating.append(info_per_spike[1])
+        ratio.append(info_per_spike[1]/info_per_spike[0])
+
+    _plt.close('bits_per_spike')
+    fig, ax = _plt.subplots(num='bits_per_spike')
+
+    ax.plot(letters_N_list, ratio, 'ko', label='basal')
+    #ax.plot(letters_N_list, basal, 'ro', label='basal')
+    #ax.plot(letters_N_list, gating, 'bo', label='gating')
+
+
+    xticks = [1,2,4,8]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticks, fontsize=10)
+    ax.set_xlabel(r'$Letters N$')
+    ax.set_xlim(0, 9)
+
+    yticks = _np.arange(0.5, 1.5, 0.5)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_ylabel(r'$\frac{gating\, efficiency}{basal\, efficiency}$')
+    ax.set_ylim(0.4, 1.4)
+    
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(length=3, right='off', top='off')
+    fig.subplots_adjust(left=0.3, bottom=.3, top=1, right=1)
+    fig.set_size_inches(2.5, 1.5)
+
+
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+    fig.savefig(datapath + 'bits_per_spike.pdf', transparent=True)
+
+
+def plot_adaptive_index_slopes(contrasts, slopes, tw_list):
+    '''
+    slopes[i,j] is the gain of a nl for a given contrast i at tw j.
+    '''
+
+    _plt.close('adaptive_index_slopes')
+    fig, ax = _plt.subplots(num = 'adaptive_index_slopes')
+
+    #_pdb.set_trace()
+    for i, tw in enumerate(tw_list):
+        max_slope = slopes[:, tw].max()
+
+        xticks = _np.divide(1, contrasts)
+        ax.plot(xticks, slopes[:, tw]/max_slope)
+
+        ax.set_xticks(xticks)
+        xlabels = [r'$\frac{1}{'+str(c)+'}$' for c in contrasts]
+        print(xlabels)
+        ax.set_xticklabels(xlabels, fontsize=14)
 # plots go here
-"""
 
 def information(cov, X):
     '''
@@ -1289,7 +2009,7 @@ def _getCondInfoP0(cov, covN, p0, condListLP, condListLPN):
                     = H(X, Z) + H(Y, Z) - H(X, Y, Z) - H(Z)
 
 
-        In computing all these entropies, I will generate the covariance matrix between LP and LP + Noise for the time points requested. The covariance between different time pionts of LP is just a submatrix of LP. The covariance matrix between different time points of LP + noise is a submatrix of covarianceLP + the corresponding diagonal terms from covN. The covariance matrix between g(t0) and g(t1)+N is a submatrix of cov (at t0, and t1) with noise from covN added to t1
+        In computing all these entropies, I will generate the covariance matrix between LP and LP + Noise for the time points requested. The covariance between different time points of LP is just a submatrix of LP. The covariance matrix between different time points of LP + noise is a submatrix of covarianceLP + the corresponding diagonal terms from covN. The covariance matrix between g(t0) and g(t1)+N is a submatrix of cov (at t0, and t1) with noise from covN added to t1
     '''
     if not isinstance(condListLP, list):
         condListLP = list(condListLP)
@@ -1322,15 +2042,15 @@ def _extractSubCov(covLP, covN, noiselessPoints, noisyPoints):
 
         covN:   2D ndarray, covariance matrix of the noise, comes from the variance in the simulation and Yusuf's intracellular data
 
-        noiselessPoints:     list of ints. Each piont corresponds to g(t) through p=(t-sim_start_t)/sim_delta_t
+        noiselessPoints:     list of ints. Each point corresponds to g(t) through p=(t-sim_start_t)/sim_delta_t
         
-        noisyPoints:         list of ints. Each piont corresponds to g(t)+noise through p=(t-sim_start_t)/sim_delta_t
+        noisyPoints:         list of ints. Each point corresponds to g(t)+noise through p=(t-sim_start_t)/sim_delta_t
 
     output:
     -------
         subCov:   2D ndarray, the covariance matrix of the points choosen
 
-        I will generate the covariance matrix between LP and LP + Noise for the time points requested. The covariance between different time pionts of LP is just a submatrix of LP. The covariance matrix between different time points of LP + noise is a submatrix of covarianceLP + the corresponding diagonal terms from covN. The covariance matrix between g(t0) and g(t1)+N is a submatrix of cov (at t0, and t1) with noise from covN added to t1 and no off diagonal element because I'm assuming that noise is uncorrelated in time.
+        I will generate the covariance matrix between LP and LP + Noise for the time points requested. The covariance between different time points of LP is just a submatrix of LP. The covariance matrix between different time points of LP + noise is a submatrix of covarianceLP + the corresponding diagonal terms from covN. The covariance matrix between g(t0) and g(t1)+N is a submatrix of cov (at t0, and t1) with noise from covN added to t1 and no off diagonal element because I'm assuming that noise is uncorrelated in time.
     '''
 
     allPoints = noiselessPoints + noisyPoints
@@ -1360,6 +2080,104 @@ def _extractSubCov(covLP, covN, noiselessPoints, noisyPoints):
             i1 = _np.floor(i/N1)+N0
             subCov[i0, i1] += covN[coords]
     '''
+
+
+def get_info_per_spike(letter_length_in_ms, letters_N):
+    '''
+    Compute total information due to teh saccade in between gating_start_t and inhibition_end_t and divide by the firing rate in the same time window
+    '''
+    
+    #_pdb.set_trace()
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+
+    # access the integrated information arrays
+    try:
+        int_info_basal = _np.fromfile(datapath + 'integrated_info_{0}b_0g'.format(letters_N))
+        int_info_gating = _np.fromfile(datapath + 'integrated_info_0b_{0}g'.format(letters_N))
+    except:
+        int_info_basal, int_info_gating = _integrate_information(letter_length_in_ms, letters_N)
+
+    # access the FR
+    basal_FR = _np.fromfile(datapath + 'basal_FR')
+    gating_FR = _np.fromfile(datapath + 'gating_FR')
+
+    # integrate fr and extract spike count in bewteen gating_start_t and inhibition_end_t
+    basal_FR = basal_FR.cumsum()*letter_length_in_ms/1000
+    gating_FR = gating_FR.cumsum()*letter_length_in_ms/1000
+
+    # Figure out the points corresponding to t = 0s and t = inhibition_end_t
+    p0 = int(-sim_start_t*1000/letter_length_in_ms)
+    p1 = int((inhibition_end_t-sim_start_t)*1000/letter_length_in_ms)
+    
+
+    basal_efficiency = (int_info_basal[p1]-int_info_basal[p0])/(basal_FR[p1]-basal_FR[p0])
+    gating_efficiency = (int_info_gating[p1]-int_info_gating[p0])/(gating_FR[p1]-gating_FR[p0])
+
+    return basal_efficiency, gating_efficiency
+
+def _integrate_information(letter_length_in_ms, letters_N):
+    '''
+    From the array representing information for letters_N and letter_length (both basal and gating), integrate the information due to the central change at the saccade (the difference between the computed information and that corresponding to FEM)
+    '''
+    #_pdb.set_trace()
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+
+    # access the information arrays
+    if letters_N == 1:
+        basal = _np.fromfile(datapath + 'mi_1b_0g'.format(letter_length_in_ms))
+        gating = _np.fromfile(datapath + 'mi_0b_1g'.format(letter_length_in_ms))
+    else:
+        basal = _np.fromfile(datapath + 'cond_mi_{0}b_0g'.format(letters_N, letter_length_in_ms))
+        gating = _np.fromfile(datapath + 'cond_mi_0b_{0}g'.format(letters_N, letter_length_in_ms))
+
+    # Compute average information before saccade
+    pnt0 = int(-sim_start_t*1000/letter_length_in_ms)
+    basal_avg   = basal[:pnt0].mean()
+    gating_avg  = gating[:pnt0].mean()
+
+    # integrate the difference
+    basal -= basal_avg
+    gating -= gating_avg
+    basal = basal.cumsum()#*letter_length_in_ms/1000
+    gating = gating.cumsum()#*letter_length_in_ms/1000
+
+    basal.tofile(datapath + 'integrated_info_{0}b_0g'.format(letters_N))
+    gating.tofile(datapath + 'integrated_info_0b_{0}g'.format(letters_N))
+
+    _plt.close('test')
+    fig, ax = _plt.subplots(num='test')
+    tax = _get_ploting_TAX(letter_length_in_ms/1000)
+    ax.plot(tax, basal)
+    ax.plot(tax, gating)
+
+    return basal, gating
+
+def _get_information_delivery_time(letter_length_in_ms, letters_N, threshold):
+    '''
+    given the output of _integrate_information (either basal or gating), compute at what time 'threshold' information is reached.
+    
+    Take the information at time 0 and figure out at what time the information crosses info_at_0 + threshold*(info_at_inhibition_end_t - info_at_0)
+
+    input:
+    ------
+        Threshold:      (float) should be a number between 0 and 1
+    
+    '''
+    _pdb.set_trace()
+    datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
+
+    basal = _np.fromfile(datapath + 'integrated_info_{0}b_0g'.format(letters_N))
+    gating = _np.fromfile(datapath + 'integrated_info_0b_{0}g'.format(letters_N))
+    
+    # Figure out the points corresponding to t = 0s and t = inhibition_end_t
+    point_0 = int(-sim_start_t*1000/letter_length_in_ms)
+    point_1 = int((inhibition_end_t-sim_start_t)*1000/letter_length_in_ms)
+
+    # figure out the times at which basal and gating informations crosses threshold
+    basal_t = _np.where(basal > basal[point_0]*(1-threshold) + threshold*basal[point_1])[0][0]*letter_length_in_ms/1000 + sim_start_t
+    gating_t = _np.where(gating > gating[point_0]*(1-threshold) + threshold*gating[point_1])[0][0]*letter_length_in_ms/1000 + sim_start_t
+    
+    return basal_t, gating_t
 
 def getInfo0(covG, covN):
     '''
@@ -1402,7 +2220,7 @@ def getNoiseCovariance(covG, sim_noise_fit, decay_time):
 
         sim_noise_fit (poly1d object):      linear fit to sim_nosie_sd vs sim_mp_sd
 
-        decay_time:     time pionts t0 and t1 have noise that is correlated according to exp(-abs(t0-t1)/decay_time)
+        decay_time:     time points t0 and t1 have noise that is correlated according to exp(-abs(t0-t1)/decay_time)
 
 
     output:
@@ -1437,7 +2255,7 @@ def getNoiseCovariance(covG, sim_noise_fit, decay_time):
     
     return covN
 
-def generate_peripheral_kernel(points):
+def generate_peripheral_kernel(gating_start_t, gating_end_t, points, save_flag=0, display_flag=0):
     '''
     points should be the deisred number of points for the kernel, probably the same as in the central/surround kernels to avoid problems
     '''
@@ -1448,20 +2266,30 @@ def generate_peripheral_kernel(points):
     # convert gating_start/end_t to points and set the values of the kernel to periphery_exc
     gating_start_p  = int(gating_start_t/sim_delta_t)
     gating_end_p    = int(gating_end_t/sim_delta_t)
-    kernel[gating_start_p:gating_end_p] = periphery_exc
+    kernel[gating_start_p:gating_end_p] = periphery_exc     # periphery_exc is a parameter defined at the top of the file
 
     # now set all points in between gating_end_p and recovery_start_t to periphery_inh
     recovery_start_p = int(recovery_start_t/sim_delta_t)
-    kernel[gating_end_p:recovery_start_p] = periphery_inh
+    kernel[gating_end_p:recovery_start_p] = -periphery_inh   # periphery_inh is a parameter defined at the top of the file
 
     # now set all points in between recvoery_start/end_t to a line joining periphery_inh and 0
     recovery_end_p = int(recovery_end_t/sim_delta_t)
-    kernel[recovery_start_p:recovery_end_p] = _np.arange(periphery_inh, 0, (0-periphery_inh)/(recovery_end_p-recovery_start_p))
+    kernel[recovery_start_p:recovery_end_p] = _np.arange(-periphery_inh, 0, (0+periphery_inh)/(recovery_end_p-recovery_start_p))
 
-    kernel *= periphery_weight
+    if save_flag:
+        kernel.tofile(periphery_kernel_file, sep=' ')
 
-    kernel.tofile(periphery_kernel_file, sep=' ')
+    if display_flag:
+        _plt.close('peripheral_kernel')
+        fig, ax = _plt.subplots(num='peripheral_kernel')
 
+        tax = _np.arange(0, len(kernel)*.005, .005)
+        ax.plot(tax, kernel, lw=2)
+
+        ax.set_ylabel(r'$Peripheral input$')
+        ax.set_xlabel(r'$Time\,(s)$')
+
+    return kernel
 
 def time_to_point(t, return_flag):
     '''
@@ -1716,47 +2544,6 @@ def _get_word_cond_info(letter_length, tax, gating_start_t, gating_end_t, g, cov
         info[i] = _info.cond_mi(words[:,1], binned_g, words[:,0])
     return info, rate
 
-def _compare_gating_with_fem(t0, deltaT, g, covG, sig_FEM, sig_gating, binsN):
-    '''
-    I have the linear prediction g as a function of time.
-    I'm going to compute FRs from g at t0 and t0-deltaT (two letters spaced by deltaT).
-    In computing the FR I'm going to use at least two different sigmoids (one for gating, one for FEM)
-    Then I'm going to compute the words with two letters and compute the information that the new letter carries about g given the previous letter.
-    I'm going to construct three different words
-        a. using both letters from no gatin sigmoid
-        b. using both letters from gating sigmoid
-        c. using one letter from gating, one from no gating
-    '''
-    # compute the binned firing rate at both t0 and t0-deltaT for each sigmoid in sigmoids
-    letters = {}
-    letters[('sig_FEM',0)]       = _info.binned(convert_to_firing_rate(t0, g, covG, [sig_FEM])[:,0], binsN, 1)
-    letters[('sig_FEM',-1)]      = _info.binned(convert_to_firing_rate(t0-deltaT, g, covG, [sig_FEM])[:,0], binsN, 1)
-    letters[('sig_gating', 0)]   = _info.binned(convert_to_firing_rate(t0, g, covG, [sig_gating])[:,0], binsN, 1)
-    letters[('sig_gating', -1)]  = _info.binned(convert_to_firing_rate(t0-deltaT, g, covG, [sig_gating])[:,0], binsN, 1)
-
-    
-    # bin g
-    p0 = time_to_point(t0, 0)
-    binned_g = _info.binned(g[:, p0], binsN, 1)
-    '''
-    _info.labels_to_prob(binned_g, output_flag=1)
-    _info.labels_to_prob(letters[('sig_FEM', 0)], output_flag=1)
-    _info.labels_to_prob(letters[('sig_FEM', -1)], output_flag=1)
-    _info.labels_to_prob(letters[('sig_gating', 0)], output_flag=1)
-    _info.labels_to_prob(letters[('sig_gating', -1)], output_flag=1)
-    '''
-    info = _np.zeros(3)
-    fr = _np.zeros_like(info)
-
-    info[0] = _info.cond_mi(letters[('sig_FEM',0)], binned_g, letters[('sig_FEM', -1)])
-    info[1] = _info.cond_mi(letters[('sig_gating', 0)], binned_g, letters[('sig_gating', -1)])
-    info[2] = _info.cond_mi(letters[('sig_gating', 0)], binned_g, letters[('sig_FEM', -1)])
-
-    fr[0] = (letters[('sig_FEM', 0)].mean() + letters[('sig_FEM', -1)].mean())/2
-    fr[1] = (letters[('sig_gating', 0)].mean() + letters[('sig_gating', -1)].mean())/2
-    fr[2] = (letters[('sig_gating', 0)].mean() + letters[('sig_FEM', -1)].mean())/2
-    return info, fr
-
 
 def info_between_fr_and_g(firing_rate, g, t1, binsN=8):
     '''
@@ -1785,48 +2572,6 @@ def info_between_fr_and_g(firing_rate, g, t1, binsN=8):
     return _info.mi(binnedFR, binned_g)
     #cov = _np.cov(firing_rate, g[:, p1])
     #return _info.gaussianInformation(cov, [0], [1])
-
-def info_decay(t0, t1, g, covG, sigmoids, binsN=8):
-    '''
-    For the given parameters, compute the firing rate (at time t0) for the given thresholds and sigmas.
-    For each Firing rate then estimate the information conveyed about 'g' at latter times (up to t1)
-
-    inputs:
-    -------
-        t0 (float):         time at which firing rate is computed
-
-        t1 (float):         last time at which information between g and firing rate is computed
-
-        g (2D ndarray):     linear prediction
-
-        sigmoids (list):    list of tuples with (threshold, sigma) for each sigmoid I want to use
-    '''
-    # make a plot with histogram of linear prediction and sigmoids
-    explore_sigmoid(g, t0, sigmoids)
-
-    # get the x axis for the plot
-    tax = list(_np.arange(t0, t1, sim_delta_t))
-
-    # preallocate ndarray for decay of info
-    decay = _np.zeros((len(tax), len(sigmoids)))
-    
-    # compute the firing rate at time t0 for the given sigmoid
-    #firing_rate = convert_to_firing_rate(sig[0], sig[1], g, t0)
-    firing_rate = convert_to_firing_rate(t0, g, covG, sigmoids)
-
-    plot_firing_rate_hist(firing_rate)
-
-    # for each time in between t0 and t1, compute the information
-    for i in range(len(sigmoids)):
-        print('processing sigmoid {0}, {1} out of {2}'.format(sigmoids[i], i+1, len(sigmoids)))
-        for t in tax:
-            decay[(t-t0)/sim_delta_t, i] = info_between_fr_and_g(firing_rate[:, i], g, t, binsN=binsN)
-
-    sigmoids_plot('decay', tax, decay, sigmoids)
-    _plt.title('binsN={0}'.format(binsN))
-    _plt.savefig('Figures/Decay, binsN={0}.pdf'.format(binsN), transparent=True)
-    return decay
-
 
 def fit_exp_to_simulation(g, df, nogating_t, gating_t, cell=None):
     '''
@@ -1961,13 +2706,15 @@ def _fix_cond_info(cond_info):
     
     return tax, fem , gating
 
-def fake_noise(s_type, contrast, samples=1E5, mean=127):
+def fake_noise(s_type, contrast, length=1000, mean=127):
     '''
     Fake a pink or gaussian stimulus depending on s_type
 
     input:
     ------
         s_type (str):   'pink' or 'gaussian'
+
+        length:     in seconds
 
     output:
     -------
@@ -1977,6 +2724,9 @@ def fake_noise(s_type, contrast, samples=1E5, mean=127):
         for the pink noise, I'm starting with a gaussian white noise -> rFFT -> dividing power in a freq by the freq -> iFFT
         The problem with this approach is that by changing the samples (time of experiment) I'm changing the lowest freq and so teh power goes to different freqs.
         I'm going to change it such that instead of generating the whole pink sequence at once, it is generated in chunks of about 5 secs
+        
+        I got code form someone on the web to generate the pink sequence. Seems to be working well until it doesn't. When computing cond_info between the LP and the noisy words I get some weird ripples that are clearly coming from the pink noise. Changing the noise amplitud to zero or using gaussian noise gets rid of the effect.
+
     '''
     #_pdb.set_trace()
 
@@ -1986,7 +2736,8 @@ def fake_noise(s_type, contrast, samples=1E5, mean=127):
     # each sample lasts sim_delta_t seconds in the simulation but to match the experiment, I don't want to flip the stimulus every sim_delta_t but rather every sim_delta_t*N, where N = number of samples in ~30ms
     monitor_flip_rate = .03
     N = int(monitor_flip_rate/sim_delta_t)
-    samples = int(samples/N)
+    #samples = int(samples/N)
+    samples = int(length/(sim_delta_t*N))
     
     if s_type == 'gaussian':
         # grab random number with 0 mean and STD=1
@@ -2117,8 +2868,8 @@ def wrap_gating_effect(g, letter_length, nl, binsN):
         letter_times = [t-letter_length, t]
         gating[p], nogating[p] = compute_gating_effect(g, letter_times, nl, binsN)
         
-    gating.tofile(datapath+'gating_effect_2L_{0}ms'.format(letter_length))
-    nogating.tofile(datapath+'nogating_effect_2L_{0}ms'.format(letter_length))
+    gating.tofile(datapath+'gating_effect_2L')
+    nogating.tofile(datapath+'nogating_effect_2L')
 
 
 def load_model_fit():
@@ -2308,7 +3059,7 @@ def fit_all_TNF_cells():
     Store all those parameters in TNF_PSTH_fits.txt
     '''
     #_pdb.set_trace()
-    bipolar = cell()
+    bipolar = cell(letter_length_in_ms)
 
     still_psths, sac_psths, tax = load_TNF_PSTHs()
 
@@ -2321,7 +3072,7 @@ def fit_all_TNF_cells():
             continue
 
         print('Fitting cell {0}'.format(i, sac_psths.shape[0]))
-        best_params = bipolar._fit_PSTH(sac_psths[i,:], 'pink', .1, 127, 96000, 96, range(-10, 200, 10), range(-100, 100, 10))
+        best_params = bipolar._fit_PSTH(sac_psths[i,:], 'pink', .1, 127, 1000, 96, range(-10, 200, 10), range(-100, 100, 10))
         fid.write('{0} {1} {2} {3}\n'.format(best_params[0], best_params[1], best_params[2], best_params[3]))
 
         print('\t\t {0}'.format(best_params[0], best_params[1]))
@@ -2341,34 +3092,374 @@ def _save_TNF_PSTHs_for_selection(sac_psths):
         fig.savefig('TNF PSTHs/c{0}'.format(i))
 
 
-def plot_stats_from_TNF_fits():
+def plot_stats_from_TNF_fits(g):
     '''
     load file TNF_PSTH_fits.txt (generated with fit_all_TNF_cells) and compute the average and std of peri_weigth and nl_thresh
     
+    g:      linear prediction, being used to change scale of thresholds from linear predictions to std of g during FEM
+
     output:
     -------
         peri_weight.mean(), peri_weight_std(), nl_thresh.mean(), nl_thresh.std() 
     '''
-
+    #_pdb.set_trace()
+    
     df = _pd.read_csv('TNF_PSTH_fits.txt', sep=' ')
 
     rows_to_drop = [13, 15, 23, 32, 34, 36, 47, 48, 49, 50, 53, 54, 55, 56, 57,58, 61, 62, 73, 85, 90,98, 99, 100, 101, 102, 103,105, 107, 109, 118, 124, 126, 128]
     df = df.drop(df.index[rows_to_drop])
 
     _plt.close('TNF_fit_stats')
-    fig, ax = _plt.subplots(nrows=2, num='TNF_fit_stats')
+    fig, ax = _plt.subplots(nrows=1, num='TNF_fit_stats')
 
-    ax[0].hist(df['peri_weight'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
-    ax[1].hist(df['nl_thresh'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
+    ax.hist(df['peri_weight'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
+    #ax[1].hist(df['nl_thresh'], bins=50, color='k', histtype='stepfilled', normed=True, alpha=.5)
     
-    ax[0].spines['top'].set_visible(False)
-    ax[0].spines['right'].set_visible(False)
-    ax[1].spines['top'].set_visible(False)
-    ax[1].spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    #ax[1].spines['top'].set_visible(False)
+    #ax[1].spines['right'].set_visible(False)
 
+    ax.tick_params(length=3, right='off', top='off')
+
+    # X axis, instead of being in linear prediction units will be relative to STD during FEM. 1) Compute std during FEM
+    FEM_points = (-.005 - sim_start_t)/sim_delta_t
+    std = g[:, :FEM_points].flatten().std()
+
+    xticks = _np.arange(0, 3.1*std, std)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(range(len(xticks)+1), fontsize=10)
+    ax.set_xlabel(r'$Threshold\,Shift\, (FEM\, std)$', fontsize=12)
+    ax.set_xlim(0, 3*std)
+
+    yticks = _np.arange(0, .05, .025)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(yticks, fontsize=10)
+    ax.set_ylabel(r'$probability$')
+    
+    fig.subplots_adjust(left=.2, bottom=.3, right=.95, top=1)
+    fig.set_size_inches(2.5, 2)
     fig.savefig('Figures/TNF_fit_stats.pdf', transparent=True)
-    return fig, df['peri_weight'].mean(), df['peri_weight'].std(), df['nl_thresh'].mean(), df['nl_thresh'].std() 
+    return fig, df['peri_weight'].mean()/std, df['peri_weight'].std()/std, df['nl_thresh'].mean()/std, df['nl_thresh'].std()/std 
+
+def compute_kernel(stim, resp, pnts_before_spk, pnts_after_spk):
+    '''
+    given a linear prediction and responses, compute the filter
+
+    pnts:   final number of pints in filter
+
+    start_t:        seconds before spike to include in kernel (should be <0)
+
+    '''
+    #_pdb.set_trace()
+    assert stim.shape == resp.shape, 'naturalscenes.compute_kernel: lp and resp should have the same shape'
+
+    kernel = _np.zeros(pnts_before_spk + pnts_after_spk )
+
     
+    stim -= stim.mean()
+    for i in range(pnts_before_spk, len(stim)-pnts_after_spk):
+        kernel += resp[i] * stim[i-pnts_before_spk:i+pnts_after_spk]
+
+    if kernel.max() != kernel.min():
+        kernel = kernel/_np.sqrt(_np.dot(kernel,kernel))
+    
+    return kernel[::-1]
+
+def adaptive_index(slopes, stds):
+    '''
+    Compute adaptive index
+    
+    From a set of nonlinearities corresponding to Gaussian stimuli of different contrasts compute the slopes.
+    Normalize slopes to the largest one in the set. 
+    Fit a line to 'normalized slopes' vs 1/sigma_i (the standard deviation of the gaussian contrast)
+    Adaptive index is the slope of the fitted line
+    
+    input:
+    -----
+        slopes:     array with the gain of each nonlinearity under the corresponding Gaussian distribution
+
+        stds:       std of the gaussian distributions that generated nonlinearities with the given slopes
+    
+    output:
+    ------
+        AI:         adaptive index
+    '''
+
+    slopes/=slopes.max()
+
+    inverse_std = _np.divide(1, stds)
+
+    return _np.polyfit(inverse_std, slopes, 1)[0]
+
+def simulate_adaptive_index():
+    '''
+    Simulate UFlicker under several contrasts.
+    For each contrast compute the nonlinearities at different TWs
+    Fit nonlinearities with a birect curve, and extract the slope of the 2nd one
+    With the slopes and the STDs of the Gaussians, compute adaptive_index in each TW
+    Plot adaptive index as a funciton of time window
+    '''
+    #_pdb.set_trace()
+    contrasts = [3,6,12,24,48]
+    contrasts = [6,12,24,48,96]
+    bipolar = cell(.005)
+    mean = 127
+
+    TWN = 12
+    ai = _np.zeros(TWN)
+    slopes = _np.zeros((len(contrasts), TWN))
+    for i, contrast in enumerate(contrasts):
+        _, _, nls = bipolar.simulate_UFlicker(mean, contrast, 200, peri_factor = 1, TWN=TWN, plot_flag=0)
+        print("contrast is ", contrast)
+        
+        #fig = _plt.gcf()
+        #ax = fig.get_axes()
+        for j, nl in enumerate(nls):
+            print("nl is ", j)
+            _, _, line_1, fit, _ = fit_birect(nl[0], nl[1])
+            #ax[12+j].plot(nl[0], fit)
+            slopes[i,j] = line_1[0]
+
+    for i in range(TWN):
+        ai[i] = adaptive_index(slopes[:,i], contrasts)
+
+    _plt.close('adaptation_index')
+    fig, ax = _plt.subplots(num='adaptation_index')
+    ax.plot(ai)
+    
+
+    plot_adaptive_index_slopes(contrasts, slopes, [0,2,5])
+    
+    return ai, slopes, contrasts
+
+def fit_birect(nl_x, nl_y):
+    '''
+    Given a non-linearity described by nl_y vs nl_x, fit it with two lines.
+
+    input:
+    -----
+        nl_x/y      1d arrays with the same number of points, plot(nl_x, nl_y) should give the nonlinearity
+
+    output:
+    ------
+        best_p:     1st line accounts for nl_x[:best_p], nl_y[:best_p]
+                    2nd line accounts for nl_x[best_p:], nl_y[best_p:]
+
+        line0/1:    output of polyfit for each of the two lines      
+
+        best_fit:   1d array with same number of points as nl_x/y with the combination of both lines.
+                    used for: plot(nl_x, best_fit)
+
+        error:      sum of square errors
+    '''
+    #_pdb.set_trace()
+
+    N = len(nl_x)
+    error = _np.infty
+
+    # loop through all points in nl_x/y, dividing the data in two parts and fit a line to each one. Keep track of total error and return best two fits
+    if nl_y.max()==0:
+        best_p = _np.nan
+        line0 = (0,0)
+        line1 = (0,0)
+        best_fit = nl_y
+        error = 0
+    else:
+        for i in range(3,N-3):
+            #sim_noise_fit = _np.poly1d(_np.polyfit(df['sim_mp_sd'], df['sim_mp_noise'],1))
+            if nl_y[:i].max() == 0:
+                res0 = [0]
+                fit0 = (0,0)
+            else:
+                fit0, res0, _, _, _ = _np.polyfit(nl_x[:i], nl_y[:i], 1, full=True)
+
+            if nl_y[i:].max() == 0:
+                res1 = [0]
+                fit1 = (0,0)
+            else:
+                fit1, res1, _, _, _ = _np.polyfit(nl_x[i:], nl_y[i:], 1, full=True)
+            
+            if res0[0]*(N-i) + res1[0]*N < error:
+                error = res0[0]*(N-i) + res1[0]*N
+                line0 = fit0
+                line1 = fit1
+                best_p = i
+
+        # make an array to plot on top of nl_y
+        best_fit = line0[0]*nl_x + line0[1]
+        best_fit[best_p:] = line1[0]*nl_x[best_p:] + line1[1]
+    
+    return best_p, line0, line1, best_fit, error
+
+def compute_nl(lp, resp, pnts):
+    '''
+    given a linear prediction and responses (both 1d ndarrays of the same length), compute the nonlinearity
+
+    inputs:
+    -------
+        lp:     linear prediction, output of convolving stim with filter
+
+        resp:   cells response, can be spikes or membrane potential but has to be alligned with lp (same number of points, etc)
+
+        pnts:   final number of points in the nonlinearity
+
+    output:
+    -------
+        lp_short:       x axis of nonliearity with 'pnts'
+
+        resp_short:     y axis of nonliearity with 'pnts'
+
+        sorted_lp:      x axis of nonlinearity with as many points as original lp
+
+        sorted_resp:    y axis of nonlinearity with as many points as original resp
+
+    '''
+
+    assert lp.shape == resp.shape, 'naturalscenes.compute_nl: lp and resp should have the same shape'
+
+    # get the indexes that would sort lp
+    indexes = lp.argsort()
+
+    # sort lp and resp according to that index but not in place
+    sorted_lp = lp[indexes]
+
+    sorted_resp = resp[indexes]
+
+    down_sample_n = int(len(lp)/pnts)
+    lp_short = average(sorted_lp, down_sample_n, 4)
+    resp_short = average(sorted_resp, down_sample_n, 4)
+
+    return lp_short, resp_short, sorted_lp, sorted_resp
+
+
+def correlations_cartoon(bits_info, bits_noise):
+    '''
+    Explain with a cartoon example why we need conditional information
+
+    A word (w) is defined as a vector of letters w = (L0, L1, ..., L(n-1))
+    '''
+    stim, noisy = _fake_correlated_stim(bits_info, bits_noise, 1000)
+
+    # Info with 1 Letter word
+    info_0 = mi(stim,stim)
+    noisy_0 = mi(stim, noisy)
+
+    # now compute the information that the perfectly linear encoder with 2 letters conveys about the correlated stim with the 2nd letter (newest)
+    info_L0 = mi(stim[1:], stim[:-1])
+    info_L1 = cond_mi(stim[1:], stim[1:], stim[:-1])
+
+    # Information of a 2-letter word about stim when noise is added
+    noisy_L0 = mi(stim[1:], noisy[:-1])
+    noisy_L1 = cond_mi(stim[1:], noisy[1:], noisy[:-1])
+
+    # Information with a 3-letter word about the stim when noise is added
+    noisy_3L_L0 = mi(stim[2:], noisy[:-2])
+    noisy_3L_L1 = cond_mi(stim[2:], noisy[1:-1], noisy[:-2])
+    noisy_3L_L2 = cond_mi(stim[2:], noisy[2:], combine_labels(noisy[:-2], noisy[1:-1]))
+
+    # Information with 1L with no noise but 2 frames
+    info_F0 = mi(stim[:-1], stim[1:])
+    info_F1 = cond_mi(stim[1:], stim[1:], stim[:-1])
+    noisy_F0 = mi(stim[:-1], noisy[1:])
+    noisy_F1 = cond_mi(stim[1:], noisy[1:], stim[:-1])
+
+    # Information with a 3-frame stimulus and 1-L word when noise is added
+    noisy_3F_F0 = mi(stim[:-2], noisy[2:])
+    noisy_3F_F1 = cond_mi(stim[1:-1], noisy[2:], stim[:-2])
+    noisy_3F_F2 = cond_mi(stim[2:], noisy[2:], combine_labels(stim[:-2], stim[1:-1]))
+
+    _plt.close('correlations_cartoon')
+    fig, ax = _plt.subplots(nrows=4, ncols=2, num='correlations_cartoon', sharex=True, sharey=True)
+
+    tax = _np.arange(sim_start_t, sim_end_t, sim_delta_t)
+
+
+    ax[0][0].plot(tax, info_0)
+    ax[0][0].plot(tax, noisy_0)
+    ax[0][0].plot([sim_start_t, -sim_delta_t,0,sim_end_t], [0, 0, 1, 1], "k")
+
+    ax[1][0].plot(tax[1:], info_L0)
+    ax[1][0].plot(tax[1:], info_L1)
+    ax[1][0].plot(tax[1:], info_L0+info_L1, ":k")
+
+    ax[2][0].plot(tax[1:], noisy_L0)
+    ax[2][0].plot(tax[1:], noisy_L1)
+    ax[2][0].plot(tax[1:], noisy_L0+noisy_L1, ":k")
+
+    ax[3][0].plot(tax[2:], noisy_3L_L0)
+    ax[3][0].plot(tax[2:], noisy_3L_L1)
+    ax[3][0].plot(tax[2:], noisy_3L_L2)
+    ax[3][0].plot(tax[2:], noisy_3L_L0+noisy_3L_L1+noisy_3L_L2, ":k")
+
+    ax[1][1].plot(tax[1:], info_F0)
+    ax[1][1].plot(tax[1:], info_F1)
+    ax[1][1].plot(tax[1:], info_F0+info_F1, ":k")
+
+    ax[2][1].plot(tax[1:], noisy_F0)
+    ax[2][1].plot(tax[1:], noisy_F1)
+    ax[2][1].plot(tax[1:], noisy_F0+noisy_F1, ":k")
+
+    ax[3][1].plot(tax[2:], noisy_3F_F0)
+    ax[3][1].plot(tax[2:], noisy_3F_F1)
+    ax[3][1].plot(tax[2:], noisy_3F_F2)
+    ax[3][1].plot(tax[2:], noisy_3F_F0+noisy_3F_F1+noisy_3F_F2, ":k")
+
+    # make plot prettier
+    ax[0][0].set_ylim(-1, bits_info+1)
+    ax[0][0].set_xlim(-.2, .8)
+    xticks = _np.arange(-.2, .8, .2)
+    ax[0][0].set_xticks(xticks)
+    yticks = [0,1,4]
+    ax[0][0].set_yticks(yticks)
+
+def _fake_correlated_stim(stim_bits, noise_bits, trials):
+    '''
+    fake stim and noisy versions.
+    
+    stim follows a uniform distribution with 'stim_bits' information and is correlated over time.
+
+    noisy, is stim + a uniform distribution with 'noise_bits' of information and no correlations.
+
+    
+    input:
+    -----
+        stim_bits:  total uncertainty in the stimulus conditioning on a change of stimulus
+                    when the stimulus changes, the new value is picked out of 2**bits possibilities
+
+        noise_bits: uncertainty in the noise at every frame
+
+        trials: number of saccades in the stimulus
+
+    output:
+    ------
+        noise:  1d array
+    '''
+    #_pdb.set_trace()
+
+    #samples per saccade
+    frames_per_saccade = (sim_end_t-sim_start_t)/sim_delta_t
+
+    # since the stim changes every correlation_length I only need stim_length/correlation_length different values
+    # I'm generating it to be already in such a way that stim[i,j] represents time i, cell j which is what I am using in informaiton calculations
+    stim = _np.random.random_integers(0, 2**stim_bits-1, (trials,1))*_np.ones((1,frames_per_saccade))
+    #stim = _np.ones((frames_per_saccade,1))*_np.random.random_integers(0, 2**bits-1, (1,trials))
+
+
+    # shift stim such that saccades happen at time 0
+    shift = int(-sim_start_t/sim_delta_t)
+    stim = _np.roll(stim, shift)
+
+    noisy = stim + _np.random.random_integers(0, 2**noise_bits-1, (trials,frames_per_saccade))
+    
+    
+    # return tuple version stim and noise, where stim[i][j] is time i, cell j
+    stim = tuple(map(tuple, stim.T))
+    noisy = tuple(map(tuple, noisy.T))
+    
+    return stim, noisy
+
+
 def _test_adaptation(contrast_list, filter_instance, nl, adaptation_block):
     _plt.close('adaptation_test')
     fig, ax = _plt.subplots(nrows=3, num='adaptation_test')
@@ -2504,55 +3595,12 @@ class nonlinear_block:
         return nonlinear_block(self.s_type, self.thresh, self.units, self.contrast, self.min_fr, self.max_fr, self.sd, self.slope)
 
     
-    """
-    def gating_rate(self, linear_prediction, units=0, bin_rate=None):
-        '''
-        convert linear prediction to firing rate but instead of using the nonlinearity given, a shifted version is used (shift is computed here if not given)
-        
-        Return the amount by which the threshold shifts. According to my model done in Igor, this is 5 * the SD of the linear prediction during Gaussian stimulation at 3% contrast
-        (in igor type "wavestats :contrast0:g1" -> v_sdev = 0.12, and g2 plot shows a threshold shift of .6)
-        '''
-        #_pdb.set_trace()
-
-        # if self doesn't have a gating_nl, just copy it and shift the threshold
-        if not hasattr(self, 'gating_nl'):
-            self.gating_nl = self.__copy__()
-            filter_instance = filter_block()
-            self.gating_nl.thresh -= 5*filter_gaussian_noise(filter_instance, 3).std()     # I want the threshold to be 5*std at 3%
-
-        # now pass the linear prediction through the shifted nonlinearity
-        return self.gating_nl.torate(linear_prediction, units=units, bin_rate=bin_rate)
-    
-    def overwrite_gating_nl(self, new_gating_nl):
-        '''
-        Overwrite or create self.gating_nl with new_gating_nl
-        whether slef.gating_nl exists or not, now new_gating_nl will be used. 
-        '''
-
-        self.gating_nl = new_gating_nl
-
-    def _test_gating(self, linear_prediction, units=0, bin_rate=None):
-        '''
-        return the rate under no gating and gatng for the given linear prediction.
-        '''
-        _pdb.set_trace()
-
-        lp = linear_prediction.flatten()
-        nongating = self.torate(lp, units=units, bin_rate=bin_rate)
-        gating = self.gating_rate(lp, units=units, bin_rate=bin_rate)
-
-        _plt.close('test_gating')
-        fig, ax = _plt.subplots(num='test_gating')
-        ax.hist([lp, nongating, gating], labels=[r'$lp$', r'$basal$', r'$gating$'])
-        ax.legend()
-    """
-
 class adaptation_block:
     '''
     Define an adaptive block, for the time being I'm only implementing dividing by memory+offset
     '''
 
-    def __init__(self, s_type, memory, offset = 0):
+    def __init__(self, s_type, memory, delta_t, offset = 0):
         '''
         Input:
         ------
@@ -2560,56 +3608,80 @@ class adaptation_block:
 
             memory:     float, in seconds
 
+            detla_t:    time resolution of array to be adapted
+
             offset:     float, in the same units as the linear prediction
 
         '''
+        from numpy.linalg import norm
+
         self.s_type = "memory_noramlization"
         self.memory = memory
+        self.delta_t = delta_t
         self.offset = offset
 
-    def adapt(self, signal):
-        '''
-        signal is probably going to be [Ca]. Divide signal by the result of convolving signal with a decaying exponential with 'memory' and adding an offset
-
-        signal can be 1d array or nd array. But dimension 0 is the dimension to be convolved by the decaying exponential
-        '''
-        from numpy.linalg import norm
 
         #_pdb.set_trace()
         # convolve signal with an exponential that decays to 1/e over "memory" seconds
-        # time unit in the exponential is the same as in signal, sim_delta_t
+        # time unit in the exponential is the same as in signal, letter_length (in seconds)
         # I'm making the exponential to be long enough such that the last point contributes .01 times what the first point contributes exp(-last/memory)=0.01
-        # last = -memory*log(0.01)
+        # last = -memory_p*log(0.01)        (is in seconds)
         last = -self.memory*_np.log(.01)
-        memory_array = _np.exp(-1*_np.arange(0, last, sim_delta_t)/self.memory)
+        self.memory_array = _np.exp(-1*_np.arange(0, last, delta_t)/self.memory)
         
+        # make memory_array such that the sum of its elements is 1 (convolve(ones(1000), memory_array) still gives ones)
+        self.memory_array /= self.memory_array.sum()
+
         # before convolving make memory_array of unit norm
-        memory_array /= norm(memory_array)
+        #self.memory_array /= norm(self.memory_array)
 
-        # convolve signal with memory_array. I work on a flatten version of array but first have to Transpose since dim0 corresponds to time
-        convolution = _np.convolve(signal.T.flatten(), memory_array)
+    def adapt(self, signal, del_flag=0):
+        '''
+        signal is probably going to be [Ca]. Divide signal by the result of convolving signal with a decaying exponential with 'memory' and adding an offset
 
-        # now convolution has len(memory_array) + len(signal.flatten()) points. I'm discarding points from the end to keep convolution the same size as signal. I'm reshaping it to be the original size. From every row now, the first len(memory_array)-1 points are trash because the filter is overlaping signal from different cells. After reshaping to signal's original shape, remove those columns
-        convolution = convolution[:-len(memory_array)+1].reshape(signal.shape, order = 'F')
+        signal can be 1d array or nd array. Last dimension is the time dimension to be convolved by the decaying exponential
 
-        convolution = _np.delete(convolution, range(len(memory_array)-1), 0)
+        by convolving, 
+        '''
 
-        signal = _np.delete(signal, range(len(memory_array)-1), 0)
+        #_pdb.set_trace()
+        N = len(self.memory_array)
+        # convolve signal with memory_array. I work on a flatten version of array
+        convolution = _np.convolve(signal.flatten(), self.memory_array)
+
+        # now convolution has len(memory_array) + len(signal.flatten()) points. I'm discarding points from the end to keep convolution the same size as signal.
+        # Then I'm reshaping it to be the original size. 
+        convolution = convolution[:- N +1].reshape(signal.shape)
+
+        if del_flag:
+            # From every row now, the first len(memory_array)-1 points are trash because the filter is overlaping signal from different cells. After reshaping to signal's original shape, remove those columns
+            convolution = _np.delete(convolution, range(N-1), convolution.ndim-1)
+
+            signal = _np.delete(signal, range(N-1), signal.ndim-1)
 
         # divide signal by convolution + offset. Convolution is longer than signal by len(memory_array)-1 points that were added to the front. That's why in the following line I have convolution[len(memory_array)-1:]
         return _np.divide(signal, convolution + self.offset)
 
+
 class filter_block:
-    def __init__(self, size, kernel_path, weight, normed=True):
+    def __init__(self, size, kernel, weight, normed=True):
         '''
         Each filter block represents a decomposable space and time filter.
         For the time being, space is defined as a circular disk and images are filtered with it. If the disk size is 0, no filtering takes place and I will use it for Uniform stimulation. Time is defined through the kernel.
 
         By combining two of such filters I can accomplish the original simulation where center was one pathway and surround was another pathway, each space-time decomposable that where latter summed.
         I can also add a third pathway that is the peripheral one, with no spatial filter
+
+        kernel can be either a 1D ndarray or a path to a file
         '''
         
-        self.kernel = _np.fromfile(kernel_path, sep=' ')
+        if isinstance(kernel, str):
+            self.kernel = _np.fromfile(kernel, sep=' ')
+        elif isinstance(kernel, _np.ndarray):
+            self.kernel = kernel
+        else:
+            raise TypeError("naturalscenes.filter_block.__init__: kernel was not understood")
+
         self.size   = size
         self.weight = weight
         self._define_spatial_filter(size*pixperdegree)
@@ -2651,7 +3723,10 @@ class filter_block:
 
         output:
         -------
-            mp:         the noiseless membrane potential contribution coming out of this pathway
+            mp:         the membrane potential contribution coming out of this pathway
+                        mp will be shorter than stim. In particular, to allign mp with stim or any other array like stim the 1st len(kernel)-1 points from stim should be removed
+                        for example if kernel = array(1,0,0,0,0) then mp = stim[4:]
+                        see test_naturalscenes.test_temporal_filter
         '''
 
         # Filter the center and the surround by its corresponding kernel
@@ -2693,9 +3768,9 @@ class filter_block:
         self.spatial_filter = self.spatial_filter / self.spatial_filter.sum()
 
 class cell:
-    def __init__(self):
+    def __init__(self, letter_length_in_ms):
         '''
-        all parameters are hardcoded for the time being
+        letter_length is in seconds and is used to generate memory kernel in adaptation_block
         '''
 
         #_pdb.set_trace()
@@ -2705,17 +3780,19 @@ class cell:
 
         self.surround = filter_block(surround_size, surround_kernel_file, surround_weight)
 
-        self.periphery = filter_block(periphery_size, periphery_kernel_file, periphery_weight)
+        
+        periphery_kernel = generate_peripheral_kernel(gating_start_t, gating_end_t, len(self.center.kernel), save_flag=1, display_flag=0)
+        self.periphery = filter_block(periphery_size, periphery_kernel, periphery_weight, normed=False) #TODO how is the size of periphery input defined? SOme redundant parameters. Clean it up 
 
         # define noise model
         self.noise_model = self._get_mp_noise_model()
 
         # Define internal threshold
         self.nl_basal = nonlinear_block(nl_type, nl_basal_threshold, nl_units)
-        self.nl_gating = nonlinear_block(nl_type, nl_gating_threshold, nl_units)
-        self.nl_inh = nonlinear_block(nl_type, nl_inh_threshold, nl_units)
+        self.nl_gating = nonlinear_block(nl_type, -nl_gating_amplitud, nl_units)
+        self.nl_inh = nonlinear_block(nl_type, nl_gating_amplitud, nl_units)
 
-        self.adaptation = adaptation_block(adaptation_type, adaptation_memory)
+        self.adaptation = adaptation_block(adaptation_type, adaptation_memory, letter_length_in_ms/1000, adaptation_offset)
 
 
     def processAllImages(self, maxImages=None, maxCellsPerImage=None):
@@ -2737,10 +3814,11 @@ class cell:
         '''
         #_pdb.set_trace()
 
-        # try loading 'LinearPrediction' from Data/, if that fails, compute it
+        # try loading 'linear_prediction' from Data/, if that fails, compute it
         from os import listdir
-        if 'LinearPrediction' in listdir():
-            g = _np.fromfile('LinearPrediction').reshape(-1,300)
+        if 'linear_prediction' in listdir():
+            sacc_path = 'Sacc={0}, RWS=.0{1}/'.format(saccade_size, int(rw_step*100))
+            g = _np.fromfile(sacc_path + 'linear_prediction').reshape(-1,300)
             return g
 
         if images_list is None:
@@ -2771,7 +3849,7 @@ class cell:
             print('\t{0} cells processed in {1} secs'.format(nextCell, _time()-t))
 
         g = g[:nextCell][:]
-        g.tofile(datapath+'LinearPrediction')
+        g.tofile('linear_prediction')
 
         return g
 
@@ -2863,6 +3941,8 @@ class cell:
                                 Both sim_mp_sd and sim_noise_sd are in the same units as the simulation
                                 Given a set of linear prediction, compute the STD and the STD of the noise to use is sim_noise_fit( linear_prediction.std() )
         '''
+        #_pdb.set_trace()
+
         # load parameters from text file
         #global bipolar_cell_file
         df = _pd.read_csv(bipolar_cell_file, sep=' ').sort('exp_contrast').reset_index(drop=True)#, index_col='exp_contrast')
@@ -2944,7 +4024,8 @@ class cell:
         '''
         #_pdb.set_trace()
         try:
-            noise = _np.fromfile('linear_prediction_noise').reshape(shape)
+            sacc_path = 'Sacc={0}, RWS=.0{1}/'.format(saccade_size, int(rw_step*100))
+            noise = _np.fromfile(sacc_path + 'linear_prediction_noise').reshape(shape)
             print('Noise loaded from "linear_prediction_noise" file')
         except:
             if corr_time == sim_delta_t:
@@ -2958,14 +4039,14 @@ class cell:
             if save_flag:
                 N = 14
                 print('*'*72)
-                print('*'+' '*N+'Saving Linear_prediction_noise'+' '*N+'*')
+                print('*'+' '*N+'Saving linear_prediction_noise'+' '*N+'*')
                 print('*'*72)
 
-                noise.tofile('linear_prediction_noise')
+                noise.tofile(sacc_path + 'linear_prediction_noise')
 
         return noise
 
-    def sim_central_pathway(self, stim_type, contrast, samples=1E5, mean=127):
+    def sim_central_pathway(self, stim_type, contrast, length=500, mean=127):
         '''
         Simulate responses to either 'pink' or 'gaussian' experiment.
         In this case there is no need to filter spatially since stimulus is all the same in space.
@@ -2974,13 +4055,17 @@ class cell:
         input:
         ------
             stim_type:      'pink' or 'gaussian'
+
+            length:         in seconds
         '''
-        # Since combolution will remove some points from stim, request a stim of length such that after convolution the response will be 'samples' as requested
-        ker_length = len(self.center.kernel)
-        stim = fake_noise(stim_type, contrast, samples=samples+2*ker_length, mean=mean)
+        # Since combolution will remove some points from stim, request a stim of length such that after convolution and rmoving the extra points the response will be of the desired length
+        #_pdb.set_trace()
+        ker_length = len(self.center.kernel)*sim_delta_t
+        stim = fake_noise(stim_type, contrast, length=length+2*ker_length, mean=mean)
         
         resp = self.center.temporal_filter(stim) + self.surround.temporal_filter(stim)
 
+        samples = int(length/sim_delta_t)
         return resp[:samples]
 
     def add_peripheral_pathway(self, central_mp, peripheral_weight, psth_pnts, amp_noise_SD=None):
@@ -3024,13 +4109,19 @@ class cell:
         '''
         Pass linear prediction 'lp', through the corresponding nonlinearity to get gating latters. Corresponding nl is a combination of nl_basal plus a shift, where the shift is given by peripheral.kernel
 
+        lp:     2D ndarray where lp[i,j] represents cell i, point in time j (and j = 0 corresponds to sim_start_t and j=-1 to sim_end_t)
+
         At this point, lp time is in sim_delta_t and NOT in letter_length
         '''
         #_pdb.set_trace()
 
         # grab peripheral contribution
-        kernel = self.periphery.kernel*nl_gating_threshold
-        
+        kernel = self.periphery.kernel*nl_gating_amplitud
+        """
+        _plt.figure()
+        tax = _np.arange(0, len(kernel)*.005, .005)
+        _plt.plot(tax, kernel)
+        """
         # preallocate gating letters
         gating_letters = _np.zeros_like(lp)
 
@@ -3046,13 +4137,128 @@ class cell:
             shift = kernel[kernel_pnt]
 
             nl = self.nl_basal.copy()
-            nl.thresh -= shift
+            nl.thresh -= shift              # periphery kernel is designed to be excitatory during gating. Since I'm modeling it as a threshold shift, the threshold has to shift in the opposite direction (decreasing to get excitation)
             gating_letters[:,p] = nl.torate(lp[:,p])
 
         return gating_letters
 
     def get_ca_concentration(self):
         self.nl.torate
+
+
+    def simulate_UFlicker(self, mean, contrast, trials, peri_factor = 1, TWN=10, nl_pnts=20, plot_flag=1):
+        '''
+        fake gaussian stimuli of given contrast and pass it through the model.
+
+        At the end, compute one PSTH and dividing lp and vesicles into tw of length 50ms each and compute kernel and nl per tw
+
+        input:
+            mean/contrast:      parameters to define Gaussian stimulation
+
+            trials:             each trial lasts len(self.periphery.kernel)*sim_delta_t seconds
+
+            peri_factor:        float design to turn on/off periphery contribution
+
+        output:
+            PSTH:
+
+            kernels:            list of kernels, one per TW     
+
+            nls:                list of nls, one per TW
+
+        '''
+        #_pdb.set_trace()
+
+        # I want to simulate the central pathway for N trials each lasting the same as periphery_kernel
+        kernel_pnts = len(self.periphery.kernel)
+        length = trials * kernel_pnts * sim_delta_t
+
+        # simulate stimulus, # has to be longer than length because convolution later on will make it shorter
+        ker_length = kernel_pnts * sim_delta_t
+        stim = fake_noise('gaussian', contrast, length=length+ker_length+1, mean=mean)
+        
+        # simulate linear response
+        samples = int(length/sim_delta_t)
+        lp_center = self.center.temporal_filter(stim) + self.surround.temporal_filter(stim)
+        stim = stim[kernel_pnts-1:]         # now stim and lp_center are aligned
+
+        # remove extra points and reshape to be (trials, kernel_pnts)
+        lp_center = lp_center[:samples].reshape(-1, kernel_pnts)
+        stim = stim[:samples].reshape(-1, kernel_pnts)
+
+        # add peipheral pathway. In next line, kernel is 1D and lp is 2D but summation works fine
+        lp = lp_center + self.periphery.weight * self.periphery.kernel * peri_factor
+
+        # generate [Ca] from lp, using fixed nl (basal, all periphery effects are taken into account in the lp)
+        letters = self.nl_basal.torate(lp)
+
+        # generate vesicle release by adapting [Ca]
+        vesicles = self.adaptation.adapt(letters)
+
+        #""" Good for debugging
+        vesicles1D = vesicles.reshape(-1)
+        stim1D = stim.reshape(-1)
+
+        # generate PSTH from vesicles. 
+        PSTH = vesicles.mean(axis=0)
+
+        """ Good for debuging. Computes one kernel and one nl from computed vesicles
+        # compute kernel from the vesicles and the stimulus
+        #_pdb.set_trace()
+        kernel = compute_kernel(stim1D, vesicles1D, kernel_pnts, 0)
+        ker_object = filter_block(1, kernel, 1)
+        recovered_lp = ker_object.temporal_filter(stim1D)
+        vesicles1D = vesicles1D[kernel_pnts-1:]
+        nl = compute_nl(recovered_lp, vesicles1D,100)
+
+        #_plt.close('UFlicker')
+        fig, ax = _plt.subplots(num='UFlicker', nrows=2)
+        ax[0].plot(kernel)
+        ax[1].plot(nl[0], nl[1])
+
+        ax[1].set_ylim(-.5, ax[1].get_ylim()[1])
+        """
+        # now compute 2 kernels and nls. One with the 1st half of the data and other with the 2nd half
+        kernels = []
+        nls = []
+        #_pdb.set_trace()
+        for i in range(TWN):
+            # define time window
+            tw_startP = i*kernel_pnts/TWN
+            tw_endP = (i+1)*kernel_pnts/TWN
+
+            # Define an array like vesicles but with zeros outside the TW in question
+            tw_vesicles = _np.zeros_like(vesicles)
+            tw_vesicles[:, tw_startP:tw_endP] = vesicles[:, tw_startP:tw_endP]
+            tw_vesicles = tw_vesicles.flatten()
+
+            # Define the Filtering block
+            kernel = compute_kernel(stim1D, tw_vesicles, kernel_pnts, 0)
+            kernels.append(kernel)
+            ker_object = filter_block(1, kernel, 1)
+
+            # Convolve stim with kernel and remove 1st points from tw_vesicles to align it with the recovered_lp
+            recovered_lp = ker_object.temporal_filter(stim1D)
+            tw_vesicles = tw_vesicles[kernel_pnts-1:]
+
+            # Downsample a few points recovered_lp and tw_vesicles before computing nl. I think adaptation effects prefent the cell from responding at the highest lps and nl comes down.
+            recovered_lp = average(recovered_lp, 10, 4)
+            tw_vesicles = average(tw_vesicles, 10, 4)
+
+            # compute nl
+            nls.append(compute_nl(recovered_lp, tw_vesicles, nl_pnts))
+
+        if plot_flag:
+            _plt.close('UFlicker2')
+            fig, ax = _plt.subplots(num='UFlicker2', nrows=2, ncols=TWN, sharey='row')
+            for col in range(TWN):
+                ax[0][col].plot(kernels[col])
+                ax[1][col].plot(nls[col][0], nls[col][1])
+                if col > 0:
+                    ax[1][col].twiny
+
+        return PSTH, kernels, nls
+
 
     def plot_gaussian_simulation_and_nls(self, g, contrast, times, nls):
         '''
@@ -3276,7 +4482,7 @@ class cell:
         return sim1, sim2
     
     
-    def simulate_PSTH(self, peri_weight, nl_thresh, avg_fr, stim_type, contrast, mean, samples, psth_pnts, central_LP=None):
+    def simulate_PSTH(self, peri_weight, nl_thresh, avg_fr, stim_type, contrast, mean, trials, psth_pnts, central_LP=None):
         '''
         simulate the PSTH.
         
@@ -3294,7 +4500,7 @@ class cell:
 
             stim_type:      'pink' or 'gaussian'
 
-            samples:    number of samples the simulation should last
+            trials:         number of trials to simulate, each lasting sim_delta_t*psth_nts
 
             psth_pnts:      number of points in the simulated PSTH. The simulation is done with sim_delta_t seconds in between points
 
@@ -3302,7 +4508,7 @@ class cell:
         #_pdb.set_trace()
         # fake the central pathway, unless given
         if central_LP is None:
-            central_LP = self.sim_central_pathway(stim_type, contrast, mean=mean, samples=samples)
+            central_LP = self.sim_central_pathway(stim_type, contrast, mean=mean, length=trials * sim_delta_t * psth_pnts)
         
             # reshape central_LP such that there are many trials each lasting psth_pnts
             central_LP = central_LP.reshape(-1, psth_pnts)
@@ -3342,7 +4548,7 @@ class cell:
 
         # get the simulated psth
 
-        psth_sim, _ = self.simulate_PSTH(peri_weight, nl_thresh, avg_fr, 'pink', .1, 127, len(psth)*trials, len(psth))
+        psth_sim, _ = self.simulate_PSTH(peri_weight, nl_thresh, avg_fr, 'pink', .1, 127, trials, len(psth))
         tax = _np.arange(0, len(psth)*sim_delta_t, sim_delta_t)
 
         _plt.close('exp_and_simulated_PSTH')
@@ -3370,7 +4576,7 @@ class cell:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        fig.set_size_inches(2,1.5)
+        fig.set_size_inches(2.5,2)
         fig.savefig('Figures/exp_and_simulated_PSTH.pdf', transparent=True)
 
         return fig
@@ -3380,7 +4586,7 @@ class cell:
         print('clicked: ', event)
         sys.stdout.flush()
 
-    def _fit_PSTH(self, exp_psth, stim_type, contrast, mean, samples, psth_pnts, peri_range, thresh_range, plot_flag=0):
+    def _fit_PSTH(self, exp_psth, stim_type, contrast, mean, trials, psth_pnts, peri_range, thresh_range, plot_flag=0):
         '''
         fit peri_weight and nl_thresh to get a good estimate between simulate_PSTH and the given experimental PSTH.
 
@@ -3394,7 +4600,7 @@ class cell:
 
             mean:           iterable of means
 
-            samples:        has to be a multiple of psth_pnts
+            trials:         how many trials to simulate, total simulation will last trials * sim_delta_t * psth_pnts
 
             ptsh_pnts:      how many points does each psth last. If using more than one condition exp_psth has all those psths concatenated togehter. In that case psth_pnts is the length of each psth. len(exp_psth) = psth_pnts * len(contrast)
 
@@ -3416,19 +4622,18 @@ class cell:
         if len(exp_psth)!= len(mean)*psth_pnts:
             raise ValueError('cell._fit_PSTH: len(exp_psth) should be equal to len(mean)*psth_pnts')
 
-        if _np.mod(samples/psth_pnts, 1):
-            raise ValueError('cell._fit_PSTH: samples should be an integer multiple of psth_pnts')
-
         #_pdb.set_trace()
 
         # redefine peripheral kernel such that gatig window alligns with experimental gating
-        self.redefine_gating_window(exp_psth)
-
+        gating_start_t, gating_end_t = self.redefine_gating_window(exp_psth)
+        peri_kernel = generate_peripheral_kernel(gating_start_t, gating_end_t, psth_pnts)
+        self.periphery = filter_block(periphery_size, peri_kernel, periphery_weight)
+        
         LP = ()
         psths = ()
         # make a first call to get central_LP
         for i in range(len(contrast)):
-            _, central_LP = self.simulate_PSTH(0, 0, 1, stim_type, contrast[i], mean[i], samples, psth_pnts)
+            _, central_LP = self.simulate_PSTH(0, 0, 1, stim_type, contrast[i], mean[i], trials, psth_pnts)
             LP = LP+(central_LP,)
 
         errors = []
@@ -3442,7 +4647,7 @@ class cell:
 
             for peri in peri_range:
                 for thresh in thresh_range:
-                    psth, _ = self.simulate_PSTH(peri, thresh, avg_fr, stim_type, c, m, samples, psth_pnts, central_LP = LP[i])
+                    psth, _ = self.simulate_PSTH(peri, thresh, avg_fr, stim_type, c, m, trials, psth_pnts, central_LP = LP[i])
                     psths = psths + (psth,)
 
                     # concatenate the different psths together
@@ -3469,7 +4674,7 @@ class cell:
         return best_params#, errors
 
 
-    def redefine_gating_window(self, exp_psth, plot_flag=0):
+    def redefine_gating_window(self, exp_psth, plot_flag=0, save_flag=0):
         '''
         redefine peripheral kernel such that gatig window alligns with experimental gating
         '''
@@ -3483,12 +4688,13 @@ class cell:
 
         p_of_min = _np.where(exp_psth[p_of_max:] < threshold)[0][0]
 
-        global gating_start_t, gating_end_t
         gating_start_t = p_of_max * sim_delta_t#- .01
         gating_end_t = (p_of_max + p_of_min) * sim_delta_t# - .01
 
-        generate_peripheral_kernel(len(exp_psth))
-
+        return gating_start_t, gating_end_t
+        """
+        peri_kernel = generate_peripheral_kernel(len(exp_psth), save_flag=save_flag)
+        
         self.periphery = filter_block(periphery_size, periphery_kernel_file, periphery_weight)
 
         if plot_flag:
@@ -3499,5 +4705,6 @@ class cell:
 
             ax.plot(tax, exp_psth)
             ax.plot(tax, self.periphery.kernel*exp_psth.max())
+        """
 
 
