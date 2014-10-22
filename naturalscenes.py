@@ -193,16 +193,17 @@ def data_summary(letter_length_in_ms):
         gating_info   = mi(binned_g[N-1:], combine_consecutive_labels(binned_gating, N))
         gating_info.tofile(datapath+'mi_0b_{0}g'.format(N))
 
+
     # compare the amount of information gained by the last letter (out of N) in several different cases:
     #   i.      both letters are under basal state
     #   ii.     letters are taken from gating response
     #_pdb.set_trace()
     for i in [2, 4, 8]:
         print('Computing information last letter carries about g in a {0}L word when all letters come form basal nl'.format(i))
-        basal_cond_info = cond_mi(binned_g, combine_consecutive_labels(binned_basal, i))
+        basal_cond_info = get_cond_info(binned_g, [binned_basal]*i)
         basal_cond_info.tofile(datapath+'cond_mi_{0}b_0g'.format(i))         # b_: basal and g_: gating "2b_0g_" means 2 basal and 0 gating letters went into the word
         print('Computing information last letter carries about g in a {0}L word when letters come from gating'.format(i))
-        gating_cond_info = cond_mi(binned_g, combine_consecutive_labels(binned_gating, i))
+        gating_cond_info = get_cond_info(binned_g, [binned_gating]*i)
         gating_cond_info.tofile(datapath+'cond_mi_0b_{0}g'.format(i))
     
     """
@@ -222,7 +223,7 @@ def data_summary(letter_length_in_ms):
     basal_cond_info = get_cond_info(binned_g, [gating_letter, binned_basal])
     """
 
-    letters_N_list = [1,2,8]
+    letters_N_list = [1,2,4,8]
     for N in letters_N_list:
         _integrate_information(letter_length_in_ms, N)
         #_get_information_delivery_time(letter_length_in_ms, N, .8)
@@ -630,7 +631,7 @@ def get_cond_info(binned_g, letters_list):
             #                       i=1-> letters_list[1][p-1*letters_delta_p]
             z += (letters_list[i][p-(lettersN-i-1)],)
         
-        #newZ = tuple(zip(z))
+        newZ = _info.combine_labels(*z)
         cond_info[p] = _info.cond_mi(x, y, newZ)
 
     return cond_info
@@ -1843,7 +1844,7 @@ def plot_integrated_information(letter_length_in_ms, letters_N_list):
     fig.savefig(datapath + 'integrated_information.pdf', transparent=True)
 
 def plot_information_delivery_time(letter_length_in_ms, letters_N_list, threshold):
-    _pdb.set_trace()
+    #_pdb.set_trace()
     basal = []
     gating = []
 
@@ -2163,7 +2164,7 @@ def _get_information_delivery_time(letter_length_in_ms, letters_N, threshold):
         Threshold:      (float) should be a number between 0 and 1
     
     '''
-    _pdb.set_trace()
+    #_pdb.set_trace()
     datapath = 'Data/{0}ms letter_length/'.format(letter_length_in_ms)
 
     basal = _np.fromfile(datapath + 'integrated_info_{0}b_0g'.format(letters_N))

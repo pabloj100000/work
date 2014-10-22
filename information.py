@@ -60,25 +60,7 @@ def labels_to_prob(labels):
 def combine_labels(*args):
     return tuple(zip(*args))
 
-"""
-def multi_D_sybmols_to_1D(x):
-    '''
-    x is an iterable where each element is multidimensional. Change each multidimensional item by an integer key
-    '''
-    #_pdb.set_trace()
-    lookuptable = {}
-    output = []
-    next_index = 0
-    for element in x:
-        # dictionary keys have to be immutable, turn element to a tuple
-        element = tuple(element)
-        if element not in lookuptable:
-            lookuptable[element] = next_index
-            next_index += 1
-        output.append(lookuptable[element])
 
-    return output
-"""
 def mi(x, y):
     '''
     compute and return the mutual information between x and y
@@ -308,3 +290,7 @@ def ismutable(x):
         return False
     else:
         return True
+
+
+
+
